@@ -23,8 +23,8 @@ function makeBowGeo() {
 }
 
 // Devuelve { groups: [{ mat, frames: [geometry…] }] } con las poses horneadas
-export function bake(key, { anim, frames = 6, height = 2, poses = null, bow = false, tint = null }) {
-  const u = new Unit(key, { height });
+export function bake(key, { anim, frames = 6, height = 2, poses = null, bow = false, tint = null, weapons = true }) {
+  const u = new Unit(key, { height, weapons });
   u.root.updateMatrixWorld(true);
   const act = anim ? u.action(anim) : null;
   const dur = act ? act.getClip().duration : 1;
@@ -51,7 +51,7 @@ export function bake(key, { anim, frames = 6, height = 2, poses = null, bow = fa
       if (src.attributes.color) g.setAttribute('color', src.attributes.color.clone());
       else { const c = o.material.color || new THREE.Color(1, 1, 1), col = new Float32Array(n * 3); for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
       if (src.index) g.setIndex(src.index.clone());
-      const gk = o.material.map ? 'map' : 'col';
+      const gk = o.material.map ? 'map:' + o.material.map.uuid : 'col';
       if (!parts.has(gk)) parts.set(gk, { map: o.material.map || null, geos: [] });
       parts.get(gk).geos.push(g.index ? g.toNonIndexed() : g);
     });
@@ -252,7 +252,7 @@ export class Archers {
   constructor(scene, castle) {
     this.scene = scene; this.list = []; this.arrows = []; this.volleyT = 8; this.time = 0;
     const baked = bake('chars/Rogue_Hooded', {
-      height: 2.0, bow: true,
+      height: 2.0, bow: false, weapons: { l: 'bow_A_withString' },
       poses: [['Ranged_Bow_Aiming_Idle', 0.2], ['Ranged_Bow_Draw', 0.25], ['Ranged_Bow_Draw', 0.55], ['Ranged_Bow_Release', 0.15]],
     });
     this.set = new InstancedSet(scene, baked, 40);
@@ -305,7 +305,8 @@ export class Archers {
       if (ar.fire && Math.random() < 0.5) game.fx.emit('fire', p, 1, { scale: 0.5 });
       if (k >= 1) {
         if (ar.member) { if (ar.member.slot && game.horde.members.includes(ar.member)) game.horde.kill(ar.member); }
-        else if (ar.enemy && !ar.enemy.dead) game.hurt(ar.enemy, 2, { quiet: true });
+        // contra enemigos reales las flechas solo son efecto visual: el daño de verdad sale de las respuestas
+        else if (ar.enemy && !ar.enemy.dead) game.fx.emit('spark', ar.to, 3);
         this.arrows.splice(i, 1); continue;
       }
       _m.lookAt(p, p2, _s.set(0, 1, 0)); _m.setPosition(p);

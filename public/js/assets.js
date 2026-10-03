@@ -13,6 +13,7 @@ export const MODELS = {
   deco: ['mountain_A_grass_trees', 'mountain_B_grass_trees', 'mountain_C_grass_trees', 'mountain_A', 'mountain_B', 'mountain_C', 'hills_A_trees', 'hills_B_trees', 'hills_C_trees', 'cloud_big', 'cloud_small', 'rock_single_A', 'rock_single_C', 'rock_single_E', 'barrel', 'bucket_arrows', 'crate_A_big', 'crate_B_big', 'crate_long_A', 'crate_open', 'flag', 'flag_red', 'flag_yellow', 'flag_green', 'ladder', 'sack', 'tent', 'weaponrack', 'wheelbarrow', 'resource_stone', 'resource_lumber', 'target'],
   nature: ['Tree_1_A', 'Tree_1_B', 'Tree_1_C', 'Tree_2_A', 'Tree_2_B', 'Tree_2_C', 'Tree_3_A', 'Tree_3_B', 'Tree_3_C', 'Tree_4_A', 'Tree_4_B', 'Tree_4_C', 'Tree_Bare_1_A', 'Bush_1_A', 'Bush_2_A', 'Bush_3_A', 'Bush_4_A', 'Rock_1_A', 'Rock_2_A', 'Rock_3_A', 'Grass_1_A', 'Grass_2_A'],
   res: ['Stone_Bricks_Stack_Small', 'Wood_Planks_Stack_Small', 'Gold_Bars_Stack_Small', 'Iron_Bars_Stack_Small', 'Stone_Chunks_Large', 'Wood_Log_Stack', 'Textiles_Stack_Small'],
+  weapons: ['sword_A', 'sword_B', 'axe_A', 'axe_B', 'shield_A', 'shield_B', 'staff_A', 'staff_B', 'dagger_A', 'dagger_B', 'bow_A_withString', 'spear_A', 'hammer_A', 'halberd', 'arrow_A'],
   chars: ['Barbarian', 'Knight', 'Mage', 'Ranger', 'Rogue', 'Rogue_Hooded', 'Skeleton_Mage', 'Skeleton_Minion', 'Skeleton_Rogue', 'Skeleton_Warrior', 'peasant'],
   enemies: ['zombie_a', 'zombie_b', 'goblin', 'imp', 'orc', 'ogre', 'mimic', 'dragon', 'monkey', 'batwing'],
 };

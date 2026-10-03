@@ -49,11 +49,13 @@ const hud = {
     $('ammoN').textContent = g.ammo; $('ammo').className = g.ammo <= 0 ? 'empty' : '';
     $('ammo').querySelector('small').textContent = g.ammo <= 0 ? 'OUT OF BOLTS! Answer to send more!' : 'bolts';
     if (g.wave < 6) { $('wave').textContent = `Wave ${g.wave + 1}/6 · ${g.breakT > 0 ? 'Get ready…' : (window.WAVE_TITLES || [])[g.wave] || ''}`; $('waveprog').firstElementChild.style.width = Math.min(100, g.waveT / g.waveLen * 100) + '%'; $('waveprog').style.display = ''; }
-    else { $('wave').textContent = '⚔️ Final battle!'; $('waveprog').style.display = 'none'; }
+    else { const left = Math.max(0, Math.ceil(g.bossLimit() - g.waveT)); $('wave').textContent = `⚔️ Final battle! · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; $('waveprog').style.display = 'none'; }
     const bosses = g.enemies.filter(e => e.isBoss && !e.dead);
     $('bossbar').classList.toggle('hidden', !bosses.length);
-    if (bosses.length) { const b = bosses[0]; $('bossName').textContent = '☠️ ' + b.boss.name; $('bossHp').style.width = Math.max(0, b.hp / b.maxHp * 100) + '%'; }
-    const tot = g.stats.correct + g.stats.wrong; $('tacc').textContent = tot ? Math.round(g.stats.correct / tot * 100) + '%' : '–';
+    if (bosses.length) { const b = bosses[0]; $('bossName').textContent = (b.shielded ? '🛡️ ' : '☠️ ') + b.boss.name + (b.shielded ? ' — shielded until 80%' : ''); $('bossbar').classList.toggle('shield', !!b.shielded); $('bossHp').style.width = Math.max(0, b.hp / b.maxHp * 100) + '%'; }
+    const tot = g.stats.correct + g.stats.wrong, acc = Math.round(g.teamAcc());
+    $('tacc').textContent = tot ? acc + '%' : '–';
+    $('teamacc').className = !tot ? '' : acc >= 80 ? 'ok' : 'bad';
   },
 };
 
@@ -68,8 +70,8 @@ async function boot() {
   atmo = new Atmosphere({ scene, lights, renderer, scenery: sceneryRefs, castle, fx });
   window.__atmo = atmo; window.__renderer = renderer;
   window.WAVE_TITLES = WAVES.map(w => w.title);
-  game.onWin = () => endBattle(true);
-  game.onLose = () => endBattle(false);
+  // el veredicto siempre lo decide la regla del 80%
+  game.onWin = game.onLose = game.onTimeUp = () => endBattle(game.passed());
   $('loadtxt').textContent = 'Ready!';
   $('clickStart').classList.remove('hidden');
   window.__game = game; // depuración
@@ -148,17 +150,53 @@ function endBattle(win) {
   game.finish(win);
   send({ t: 'end', win });
 }
-function showFinal(win, ranking) {
-  $('ftitle').textContent = win ? '👑 Victory!' : '💔 The castle fell…';
-  $('fsub').textContent = win ? 'The princess is safe. You passed the exam, heroes!' : 'Study hard and try again, heroes!';
-  const top = ranking.slice(0, 3); const order = [top[1], top[0], top[2]];
-  $('podium').innerHTML = order.map((r, i) => r ? `<div class="pod"><img src="/assets/portraits/${r.char}.png"><b style="font-size:22px">${esc(r.name)}</b><div>${r.points} pts · ${r.accuracy}%</div><div class="blk" style="height:${[90, 130, 60][i]}px">${['🥈', '🥇', '🥉'][i]}</div></div>` : '<div class="pod"></div>').join('');
-  $('ranking').innerHTML = ranking.slice(3, 23).map(r => `<div><span>#${r.rank}</span><span>${esc(r.name)}</span><span>${r.points} · ${r.accuracy}%</span></div>`).join('');
-  const s = game.stats, tot = s.correct + s.wrong;
-  $('tstats').innerHTML = `<div><b>${tot ? Math.round(s.correct / tot * 100) : 0}%</b>team accuracy</div><div><b>${s.correct}</b>correct answers</div><div><b>${s.golden}</b>golden answers</div><div><b>${s.kills}</b>monsters defeated</div><div><b>${Math.ceil(game.hp / game.maxHp * 100)}%</b>castle left</div>`;
-  setTimeout(() => { $('final').classList.remove('hidden'); $('hud').classList.add('hidden'); }, 3500);
+// Tarjetas de resultados: retroalimentación para cada estudiante desde el tablero
+let finalCards = [];
+function cardHTML(r) {
+  const f = r.feedback || (window.FEEDBACK ? FEEDBACK.build(r) : { rank: {}, strengths: [], weaknesses: [], tips: [] });
+  const li = a => a.map(x => `<li>${esc(x)}</li>`).join('');
+  return `<div class="card ${f.passed ? 'pass' : 'fail'}">
+    <div class="pos">#${r.rank} · ${r.points} pts</div>
+    <div class="hd"><img src="/assets/portraits/${r.char}.png" alt=""><div><div class="nm">${esc(r.name)}</div><div class="rk">${f.rank.icon || ''} ${esc(f.rank.title || '')}</div></div></div>
+    <div class="line">${esc(f.rank.line || '')}</div>
+    <div class="nums"><span class="ok">✓ ${r.correct}</span><span class="no">✗ ${r.wrong ?? 0}</span>${r.timeout ? `<span class="to">⌛ ${r.timeout}</span>` : ''}<span class="acc">${r.accuracy}%</span></div>
+    ${f.strengths.length ? `<h4 class="g">💪 Strengths</h4><ul>${li(f.strengths)}</ul>` : ''}
+    ${f.weaknesses.length ? `<h4 class="w">🎯 Needs work</h4><ul>${li(f.weaknesses)}</ul>` : ''}
+    ${f.tips.length ? `<h4 class="t">📖 How to improve</h4><ul class="tip">${li(f.tips)}</ul>` : ''}
+  </div>`;
 }
-$('againBtn').onclick = () => { send({ t: 'lobby' }); showLobby(); };
+function zoomCard(i) {
+  const z = $('cardZoom');
+  if (i == null || !finalCards.length) return z.classList.add('hidden');
+  i = (i + finalCards.length) % finalCards.length; z.dataset.i = i;
+  z.innerHTML = cardHTML(finalCards[i]) + `<button class="btn ghost nav l">‹</button><button class="btn ghost nav r">›</button><button class="btn small close">✕ Close</button>`;
+  z.classList.remove('hidden');
+  z.querySelector('.l').onclick = e => { e.stopPropagation(); zoomCard(i - 1); };
+  z.querySelector('.r').onclick = e => { e.stopPropagation(); zoomCard(i + 1); };
+  z.querySelector('.close').onclick = () => zoomCard(null);
+  z.onclick = e => { if (e.target === z) zoomCard(null); };
+}
+addEventListener('keydown', e => {
+  if ($('cardZoom').classList.contains('hidden')) return;
+  const i = +$('cardZoom').dataset.i;
+  if (e.key === 'ArrowRight') zoomCard(i + 1); else if (e.key === 'ArrowLeft') zoomCard(i - 1); else if (e.key === 'Escape') zoomCard(null);
+});
+function showFinal(win, ranking, team) {
+  const s = game.stats;
+  team = team || { accuracy: Math.round(game.teamAcc()), correct: s.correct, total: s.correct + s.wrong, pass: 80 };
+  $('ftitle').textContent = win ? '👑 Exam passed — the castle stands!' : '💔 The castle fell…';
+  $('ftitle').className = win ? '' : 'fail';
+  $('fsub').textContent = win ? 'The princess is safe. Well done, heroes!' : `The academy needs ${team.pass}% to pass. Read your card, study your weak spots and try again!`;
+  const col = team.accuracy >= team.pass ? '#3f9b4a' : '#c0503a';
+  $('verdict').innerHTML = `<b style="font-size:22px">Team accuracy: <span style="color:${col}">${team.accuracy}%</span></b><div class="vbar"><i style="width:${Math.min(100, team.accuracy)}%;background:${col}"></i><em></em></div><span>${win ? '✅ PASSED' : '❌ NOT PASSED'} (${team.pass}% needed)</span>`;
+  const passN = ranking.filter(r => r.feedback && r.feedback.passed).length;
+  $('tstats').innerHTML = `<div><b>${team.correct}/${team.total}</b>correct answers</div><div><b>${passN}/${ranking.length}</b>students at 80%+</div><div><b>${s.golden}</b>golden answers</div><div><b>${s.kills}</b>monsters defeated</div>`;
+  finalCards = ranking;
+  $('cards').innerHTML = ranking.map(cardHTML).join('');
+  [...$('cards').children].forEach((c, i) => c.onclick = () => zoomCard(i));
+  setTimeout(() => { $('final').classList.remove('hidden'); $('hud').classList.add('hidden'); }, win ? 3500 : 4500);
+}
+$('againBtn').onclick = () => { zoomCard(null); send({ t: 'lobby' }); showLobby(); };
 function setPause(on) {
   if (game.phase !== 'playing') return;
   state.paused = on; $('pauseO').classList.toggle('hidden', !on); send({ t: 'pause', on });
@@ -166,7 +204,7 @@ function setPause(on) {
 $('pauseBtn').onclick = () => setPause(true);
 $('resumeBtn').onclick = () => setPause(false);
 $('skipBtn').onclick = () => { setPause(false); game.nextWave(); };
-$('endBtn').onclick = () => { setPause(false); endBattle(game.hp > game.maxHp * 0.5); };
+$('endBtn').onclick = () => { setPause(false); endBattle(game.passed()); };
 addEventListener('keydown', e => { if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { if (game && game.phase === 'playing') setPause(!state.paused); } });
 
 // ---------- Red ----------
@@ -194,7 +232,7 @@ function onMsg(m) {
   if (m.t === 'q_spawn') return game.onQuestion(m);
   if (m.t === 'q_result') return game.onResult(m);
   if (m.t === 'upgrade') return game.onUpgrade(m);
-  if (m.t === 'final') return showFinal(m.win, m.ranking);
+  if (m.t === 'final') return showFinal(m.win, m.ranking, m.team);
 }
 
 // ---------- Cámara y bucle ----------
@@ -215,7 +253,10 @@ function updateCamera(dt) {
   } else if (game.focus && game.focus.t > 0) {
     game.focus.t -= dt;
     const p = game.focus.target.position;
-    want.copy(p).add(new THREE.Vector3(-7, 10, 18)).lerp(GAME_CAM, game.focus.zoom ?? 0.35); look.copy(p).setY(p.y + 2);
+    // mismo ángulo que la cámara normal, solo que más cerca del objetivo (nunca da la vuelta)
+    const dir = GAME_CAM.clone().sub(GAME_LOOK).normalize();
+    const dist = 64 * (0.42 + 0.25 * (game.focus.zoom ?? 0.35));
+    want.copy(p).addScaledVector(dir, dist); look.copy(p).setY(p.y + 2);
   } else {
     const t = clock.elapsedTime;
     want.copy(GAME_CAM).add(new THREE.Vector3(Math.sin(t * 0.07) * 3, 0, Math.cos(t * 0.05) * 2)); look.copy(GAME_LOOK);

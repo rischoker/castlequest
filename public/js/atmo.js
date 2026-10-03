@@ -4,6 +4,17 @@ import * as THREE from 'three';
 import * as S from './audio.js';
 import { GLOW_TEX } from './crowd.js';
 import { Glows } from './fx.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// textura de llama (lágrima: blanca en el centro, naranja hacia afuera)
+const FLAME_TEX = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const shape = () => { g.beginPath(); g.moveTo(32, 4); g.bezierCurveTo(44, 24, 52, 38, 46, 50); g.bezierCurveTo(42, 60, 22, 60, 18, 50); g.bezierCurveTo(12, 38, 20, 24, 32, 4); g.closePath(); };
+  const gr = g.createRadialGradient(32, 46, 2, 32, 40, 30);
+  gr.addColorStop(0, 'rgba(255,240,170,1)'); gr.addColorStop(0.2, 'rgba(255,190,60,1)'); gr.addColorStop(0.6, 'rgba(240,90,10,0.85)'); gr.addColorStop(1, 'rgba(180,30,0,0)');
+  shape(); g.fillStyle = gr; g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
 import { HALF, WALK_Y, WALL_H, groundY } from './world.js';
 
 const C = h => new THREE.Color(h);
@@ -29,19 +40,26 @@ export class Atmosphere {
     this.skyCanvas = document.createElement('canvas'); this.skyCanvas.width = 4; this.skyCanvas.height = 256;
     this.skyTex = new THREE.CanvasTexture(this.skyCanvas); this.skyTex.colorSpace = THREE.SRGBColorSpace;
     scene.background = this.skyTex;
-    // antorchas de la muralla
+    // braseros en el adarve y a los lados del portón (hierro + llama + brillo)
     this.torches = [];
-    const torchMat = new THREE.SpriteMaterial({ map: GLOW_TEX, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffa040 });
-    const poleGeo = new THREE.CylinderGeometry(0.07, 0.09, 1.2, 5), poleMat = new THREE.MeshStandardMaterial({ color: 0x3a2412 });
-    const addTorch = p => {
-      const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.copy(p).add(new THREE.Vector3(0, 0.6, 0)); scene.add(pole);
-      this.torches.push({ ph: Math.random() * 10, p: p.clone().add(new THREE.Vector3(0, 1.35, 0)) });
-    };
-    for (const seg of castle.segments) for (const off of [-1.6, 1.6]) addTorch(seg.center.clone().addScaledVector(seg.along, off).addScaledVector(seg.n, 0.9).setY(seg.isGate ? WALL_H + 0.2 : WALK_Y + 0.6));
-    for (const [x, z] of [[HALF, HALF], [HALF, -HALF], [-HALF, -HALF], [-HALF, HALF]]) addTorch(new THREE.Vector3(x * 1.08, 0.2, z * 1.08));
+    const iron = new THREE.MeshStandardMaterial({ color: 0x2e2a28, metalness: 0.6, roughness: 0.5 });
+    const bowl = new THREE.CylinderGeometry(0.42, 0.22, 0.32, 8, 1, true).translate(0, 0.95, 0);
+    const coals = new THREE.CylinderGeometry(0.36, 0.36, 0.06, 8).translate(0, 1.0, 0);
+    const legs = [0, 1, 2].map(i => { const a = i / 3 * Math.PI * 2; return new THREE.CylinderGeometry(0.04, 0.04, 1.0, 4).rotateZ(0.18).rotateY(a).translate(Math.cos(a) * 0.18, 0.5, Math.sin(a) * 0.18); });
+    const brazierGeo = mergeGeometries([bowl, ...legs].map(g => g.toNonIndexed()));
+    const spots = [];
+    for (const seg of castle.segments) spots.push(seg.center.clone().addScaledVector(seg.along, seg.isGate ? -1.4 : -1.7).addScaledVector(seg.n, seg.isGate ? -0.3 : -0.9).setY(seg.isGate ? WALL_H + 0.05 : WALK_Y));
+    const g = castle.gate.seg;
+    for (const s of [-1, 1]) spots.push(g.center.clone().addScaledVector(g.along, s * 3.4).addScaledVector(g.n, 2.4).setY(0));
+    const braziers = new THREE.InstancedMesh(brazierGeo, iron, spots.length);
+    const coalMesh = new THREE.InstancedMesh(coals, new THREE.MeshBasicMaterial({ color: 0xff5a1a }), spots.length);
+    spots.forEach((p, i) => { const m = new THREE.Matrix4().makeTranslation(p.x, p.y, p.z); braziers.setMatrixAt(i, m); coalMesh.setMatrixAt(i, m); this.torches.push({ ph: Math.random() * 10, p: p.clone().add(new THREE.Vector3(0, 1.45, 0)) }); });
+    braziers.castShadow = true; scene.add(braziers); scene.add(coalMesh);
     // fogatas enemigas
     this.fires = (scenery.fires || []).map(p => ({ p: p.clone().add(new THREE.Vector3(0, 1, 0)), ph: Math.random() * 9 }));
-    this.glows = new Glows(scene, [...this.torches.map(t => t.p), ...this.fires.map(f => f.p)], GLOW_TEX);
+    const allP = [...this.torches.map(t => t.p), ...this.fires.map(f => f.p)];
+    this.glows = new Glows(scene, allP, GLOW_TEX);                 // halo grande y suave
+    this.flames = new Glows(scene, allP, FLAME_TEX, 0xffffff);      // llama con forma de lágrima
     // luces puntuales (pocas, fijas, para no recompilar sombreadores)
     this.points = [[GATE_X(), 6, HALF + 2], [1.5, 7, 0], [-10, 7, -4]].map(([x, y, z]) => { const l = new THREE.PointLight(0xff9a4a, 0, 30, 1.6); l.position.set(x, y, z); scene.add(l); return l; });
     // lluvia
@@ -95,9 +113,15 @@ export class Atmosphere {
     if ((this.frame = (this.frame || 0) + 1) % 3 === 0 || this.flash > 0) this.apply(this.p);
     // antorchas y fogatas: más intensas de noche, siempre parpadeando
     const glow = 0.35 + this.night * 0.85;
-    this.torches.forEach((t, i) => { const k = 1 + Math.sin(this.time * 11 + t.ph) * 0.1 + Math.sin(this.time * 23 + t.ph) * 0.06; this.glows.set(i, 2.2 * k * (0.6 + glow * 0.5), glow); if (Math.random() < dt * (2 + this.night * 5)) this.fx.emit('fire', t.p, 1, { scale: 0.45, vy: 0.6 }); });
-    this.fires.forEach((f, j) => { const k = 1 + Math.sin(this.time * 7 + f.ph) * 0.12; this.glows.set(this.torches.length + j, 7 * k, 0.35 + this.night * 0.65); if (Math.random() < dt * 6) this.fx.emit('fire', f.p, 1, { scale: 1.5 }); if (Math.random() < dt * 2) this.fx.emit('smoke', f.p.clone().setY(f.p.y + 2), 1, { scale: 1.4 }); });
-    this.glows.commit(); this.glows.mat.uniforms.uScale.value = this.fx.batches.fire.mat.uniforms.uScale.value;
+    this.torches.forEach((t, i) => {
+      const k = 1 + Math.sin(this.time * 11 + t.ph) * 0.12 + Math.sin(this.time * 27 + t.ph) * 0.07;
+      this.flames.set(i, 1.15 * k, 0.9); this.glows.set(i, 4 * k, 0.18 + glow * 0.45);
+      if (Math.random() < dt * 7) this.fx.emit('fire', t.p.clone().setY(t.p.y - 0.25), 1, { scale: 0.45, vy: 0.5, spread: 0.15 });
+      if (Math.random() < dt * 2) this.fx.emit('spark', t.p, 1, { scale: 0.6, vy: 0.4, spread: 0.6 });
+    });
+    this.fires.forEach((f, j) => { const k = 1 + Math.sin(this.time * 7 + f.ph) * 0.12, i = this.torches.length + j; this.flames.set(i, 3.2 * k, 1); this.glows.set(i, 8 * k, 0.3 + this.night * 0.6); if (Math.random() < dt * 2) this.fx.emit('smoke', f.p.clone().setY(f.p.y + 2), 1, { scale: 1.4 }); });
+    this.glows.commit(); this.flames.commit();
+    const sc = this.fx.batches.fire.mat.uniforms.uScale.value; this.glows.mat.uniforms.uScale.value = sc; this.flames.mat.uniforms.uScale.value = sc;
     this.points.forEach((l, i) => { l.intensity = this.night * (30 + Math.sin(this.time * 9 + i) * 4) + this.flash * 10; });
     // lluvia
     this.rain.material.opacity = this.storm * 0.55;

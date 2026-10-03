@@ -220,7 +220,8 @@ export function buildScenery(realScene) {
   stakeMesh.castShadow = true; stakeMesh.receiveShadow = true; realScene.add(stakeMesh);
   scene = realScene;
   for (let i = 0; i < 12; i++) {
-    const c = place('deco/cloud_' + (i % 3 ? 'big' : 'small'), rnd(-150, 150), rnd(-130, 60), { s: rnd(10, 20), y: rnd(40, 58), scene, shadow: false });
+    // nubes altas y lejos (por detrás del castillo), para que nunca tapen la batalla
+    const c = place('deco/cloud_' + (i % 3 ? 'big' : 'small'), rnd(-170, 170), rnd(-170, -95), { s: rnd(14, 24), y: rnd(70, 95), scene, shadow: false });
     clouds.push(c);
   }
   return { clouds, fires };

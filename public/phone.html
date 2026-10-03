@@ -62,6 +62,8 @@ body.golden .card{background:linear-gradient(#fff6d5,#f5dd8c);border-color:#d4a0
 .ups{display:grid;gap:10px}
 .up{display:flex;gap:12px;align-items:center;text-align:left;font:inherit;padding:12px;border-radius:12px;border:3px solid #d4a017;background:linear-gradient(#fff6d5,#f5dd8c);color:var(--ink);box-shadow:0 4px 0 #9c7410;cursor:pointer}
 .up .ic{font-size:38px}.up .nm{font-weight:bold;font-size:19px}.up .ds{font-size:15px}
+.rankcard{display:flex;gap:12px;align-items:center}.rankcard .ri{font-size:46px}.rankcard b{display:block;font-size:22px;color:#7a2a10}.rankcard small{font-size:13px;opacity:.85}
+.fb .nums{display:flex;gap:14px;font-weight:bold;font-size:17px;margin:4px 0}.fb h4{margin:8px 0 2px;font-size:14px}.fb ul{margin:0;padding-left:18px;font-size:14px;line-height:1.35}
 .final-rank{font-size:56px;text-align:center;color:var(--gold);font-weight:bold;text-shadow:0 3px 0 #000}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .stat{background:#0005;border:1px solid #f2c14e44;border-radius:10px;padding:10px;text-align:center}
@@ -293,17 +295,25 @@ function showUpgrades(list) {
 function showFinal(m) {
   clearInterval(tick); document.body.classList.remove('golden');
   const r = m.report, medal = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : '#' + r.rank;
+  const f = r.feedback || FEEDBACK.build(r);
+  const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const li = (h, a) => a && a.length ? `<h4>${h}</h4><ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
   const parts = (r.parts || []).map(p => `<div class="row"><span>${p.name}</span><span style="display:flex;gap:8px;align-items:center">${p.ok}/${p.n}<span class="bar"><i style="width:${p.n ? p.ok / p.n * 100 : 0}%"></i></span></span></div>`).join('');
   $('final').innerHTML = `
     <h1>${m.win === false ? '💔 The castle fell…' : m.win ? '👑 Victory!' : '📜 Results'}</h1>
+    ${m.team ? `<p style="text-align:center;margin:0">Team accuracy <b style="color:${m.team.accuracy >= m.team.pass ? '#7dff8a' : '#ff7a6a'}">${m.team.accuracy}%</b> · ${m.team.pass}% needed</p>` : ''}
+    <div class="card rankcard"><div class="ri">${f.rank.icon}</div><div><b>${f.rank.title}</b><small>${f.rank.line}</small></div></div>
     <div class="final-rank">${medal}<div style="font-size:16px;color:var(--parch)">of ${m.players} defenders</div></div>
     <div class="stats">
       <div class="stat"><b>${r.points}</b>points</div><div class="stat"><b>${r.accuracy}%</b>accuracy</div>
       <div class="stat"><b>${r.correct}/${r.total}</b>correct</div><div class="stat"><b>🔥 ${r.best}</b>best streak</div>
       <div class="stat"><b>✨ ${r.goldenOk}/${r.golden}</b>golden</div><div class="stat"><b>${r.avgTime ?? '–'}s</b>avg. time</div>
     </div>
+    <div class="card fb"><label>Your feedback</label>
+      <div class="nums"><span style="color:#2a8a3a">✓ ${r.correct} correct</span><span style="color:#b8301e">✗ ${r.wrong ?? 0} wrong</span>${r.timeout ? `<span>⌛ ${r.timeout} late</span>` : ''}</div>
+      ${li('💪 Strengths', f.strengths)}${li('🎯 Needs work', f.weaknesses)}${li('📖 How to improve', f.tips)}</div>
     <div class="card parts"><label>Your exam report · ${r.level}</label>${parts || '<p>No answers yet.</p>'}</div>
-    <button class="btn" id="submitBtn">🌍 Send my score to the world ranking</button>
+    <button class="btn" id="submitBtn">🌍 Send my score to the world ranking (optional)</button>
     <div class="err" id="subMsg"></div>
     <div class="card lb" id="lb"><label>🌍 World top 10 · ${r.level}</label><div id="lbRows">Loading…</div></div>`;
   show('final');
@@ -327,5 +337,6 @@ async function loadTop(lv) {
 connect();
 </script>
 <script src="/shared/upgrades.js"></script>
+<script src="/shared/feedback.js"></script>
 </body>
 </html>

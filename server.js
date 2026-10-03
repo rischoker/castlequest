@@ -7,6 +7,7 @@ const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const UPGRADES = require('./public/shared/upgrades.js');
+const FEEDBACK = require('./public/shared/feedback.js');
 
 // Los modelos 3D vienen comprimidos en assets.zip (así el repositorio tiene pocos archivos).
 // Al arrancar, si falta la carpeta public/assets, se descomprime automáticamente.
@@ -71,7 +72,7 @@ function createRoom(ws) {
 }
 
 function resetPlayerStats(p) {
-  p.stats = { correct: 0, wrong: 0, timeout: 0, golden: 0, goldenOk: 0, points: 0, streak: 0, best: 0, parts: {}, times: [] };
+  p.stats = { correct: 0, wrong: 0, timeout: 0, golden: 0, goldenOk: 0, points: 0, streak: 0, best: 0, parts: {}, times: [], ratios: [] };
   p.deck = []; p.gdeck = []; p.sinceGolden = 0; p.q = null; clearTimeout(p.timer); clearTimeout(p.nextTimer);
 }
 
@@ -115,9 +116,10 @@ function resolve(room, p, answer, timedOut, forced) {
     else ok = Number.isInteger(answer) && cur.options && cur.options[answer] === q.o[q.a];
   }
   const st = p.stats; const part = q.part;
-  st.parts[part] ||= { name: partInfo(q).name, ok: 0, n: 0 };
+  st.parts[part] ||= { key: part, name: partInfo(q).name, ok: 0, n: 0 };
   st.parts[part].n++;
   const elapsed = (Date.now() - cur.started) / 1000;
+  if (!timedOut && forced == null) st.ratios.push(Math.min(1, elapsed / cur.time));
   let pts = 0;
   if (ok) {
     st.correct++; st.parts[part].ok++; st.streak++; st.best = Math.max(st.best, st.streak);
@@ -153,25 +155,34 @@ function pickUpgrade(room, p, id) {
 
 function report(room, p) {
   const st = p.stats; const n = st.correct + st.wrong + st.timeout;
-  return {
-    name: p.name, char: p.char, level: room.cfg.level, points: st.points, correct: st.correct, total: n,
+  const timeRatio = st.ratios.length ? st.ratios.reduce((a, b) => a + b, 0) / st.ratios.length : null;
+  const parts = Object.values(st.parts);
+  const r = {
+    name: p.name, char: p.char, level: room.cfg.level, points: st.points, correct: st.correct, wrong: st.wrong, timeout: st.timeout, total: n,
     accuracy: n ? Math.round(st.correct / n * 100) : 0, best: st.best, golden: st.golden, goldenOk: st.goldenOk,
     avgTime: st.times.length ? +(st.times.reduce((a, b) => a + b, 0) / st.times.length).toFixed(1) : null,
-    parts: Object.values(st.parts),
+    timeRatio, parts,
   };
+  r.feedback = FEEDBACK.build(r);
+  return r;
 }
 
 function endGame(room, win) {
   if (room.state !== 'playing') return;
-  room.state = 'ended'; room.lastWin = !!win;
-  const all = [];
+  room.state = 'ended';
+  const all = []; let ok = 0, tot = 0;
   for (const p of room.players.values()) {
     clearTimeout(p.timer); clearTimeout(p.nextTimer); p.q = null; p.pendingUpgrades = null;
-    const r = report(room, p); all.push({ id: p.id, ...r });
+    const r = report(room, p); all.push({ id: p.id, ...r }); ok += r.correct; tot += r.total;
   }
+  // Regla de la academia: el examen se aprueba con 80% de precisión del equipo.
+  const teamAcc = tot ? Math.round(ok / tot * 100) : 0;
+  if (typeof win !== 'boolean') win = tot > 0 && teamAcc >= FEEDBACK.PASS;
+  room.lastWin = !!win;
   all.sort((a, b) => b.points - a.points);
-  all.forEach((r, i) => { r.rank = i + 1; const p = room.players.get(r.id); send(p.ws, { t: 'final', win, report: r, players: all.length }); });
-  toHost(room, { t: 'final', win, ranking: all });
+  const team = { accuracy: teamAcc, correct: ok, total: tot, pass: FEEDBACK.PASS };
+  all.forEach((r, i) => { r.rank = i + 1; const p = room.players.get(r.id); send(p.ws, { t: 'final', win, report: r, players: all.length, team }); });
+  toHost(room, { t: 'final', win, ranking: all, team });
 }
 
 // ---------- Tabla global (Supabase vía servidor; si no hay Supabase, archivo local) ----------

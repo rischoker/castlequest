@@ -78,7 +78,11 @@ input[type=range]{width:100%}
 #bossbar .b{height:22px;border-radius:12px;background:#000b;border:3px solid #a070e0;overflow:hidden;margin-top:4px}
 #bossbar .b i{display:block;height:100%;background:linear-gradient(#c070ff,#6a1ab0);transition:width .2s}
 #teamacc{position:absolute;right:18px;bottom:18px;background:#0009;border:2px solid #f2c14e66;border-radius:14px;padding:8px 14px;font-size:16px;text-align:right}
-#teamacc b{font-size:26px;color:var(--gold)}
+#teamacc b{font-size:30px;color:var(--gold)}
+#teamacc small{display:block;font-size:13px;opacity:.8}
+#teamacc.ok{border-color:#5fd36a}#teamacc.ok b{color:#7dff8a}
+#teamacc.bad{border-color:#ff5a4a}#teamacc.bad b{color:#ff7a6a}
+#bossbar.shield .b{border-color:#7fd8ff;box-shadow:0 0 18px #7fd8ff}#bossbar.shield .b i{background:linear-gradient(#bfefff,#3a8ad0)}
 #tools{position:absolute;right:18px;top:122px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
 /* banner */
 #banner{position:fixed;top:30%;left:0;right:0;text-align:center;z-index:6;pointer-events:none;opacity:0}
@@ -99,20 +103,46 @@ input[type=range]{width:100%}
 .ftext{font-weight:bold;font-size:22px;text-shadow:0 2px 3px #000;white-space:nowrap}
 .ftext.good{color:#ffe08a}.ftext.bad{color:#ff7a6a}.ftext.ammo{color:#fff;font-size:26px}.ftext.heal{color:#8fffb0}
 /* final */
-#final{inset:0;display:grid;place-items:center;background:#000a;z-index:20}
-#final .panel{width:min(1100px,94vw);max-height:92vh;overflow:auto;text-align:center}
-#final h1{font-size:64px;margin:0;color:#7a2a10}
-.podium{display:flex;justify-content:center;align-items:flex-end;gap:16px;margin:14px 0}
-.pod{display:flex;flex-direction:column;align-items:center;gap:6px;width:180px}
-.pod img{width:110px;height:110px;border-radius:14px;background:linear-gradient(#7fb2d9,#cfe6c6);border:4px solid var(--gold2)}
-.pod .blk{width:100%;border-radius:10px 10px 0 0;background:linear-gradient(#ffd977,#c8901c);color:#3a2410;font-size:34px;font-weight:bold;display:grid;place-items:center}
-.ranking{columns:2;text-align:left;font-size:18px;margin:10px 0}
-.ranking div{break-inside:avoid;padding:3px 6px;border-bottom:1px dashed #b8955a66;display:flex;gap:8px}
-.ranking div span:nth-child(2){flex:1}
-.tstats{display:flex;justify-content:center;gap:26px;font-size:18px;margin:8px 0}
-.tstats b{display:block;font-size:30px;color:#7a2a10}
-#pauseO{inset:0;display:grid;place-items:center;background:#0009;z-index:15}
-#pauseO .panel{text-align:center;display:flex;flex-direction:column;gap:10px;min-width:320px}
+#final{inset:0;display:grid;place-items:center;background:#000b;z-index:20}
+#final .panel{width:min(1800px,97vw);height:95vh;display:flex;flex-direction:column;text-align:center;padding:14px 18px}
+#final h1{font-size:52px;margin:0;color:#7a2a10;line-height:1.1}
+#final h1.fail{color:#8a1a10}
+.verdict{display:flex;align-items:center;justify-content:center;gap:22px;margin:10px 0 12px;font-size:17px;flex-wrap:wrap}
+.vbar{position:relative;width:360px;height:22px;border-radius:12px;background:#0002;border:2px solid #8a6a3a;overflow:visible}
+.vbar i{display:block;height:100%;border-radius:10px}
+.vbar em{position:absolute;left:80%;top:-7px;bottom:-7px;border-left:3px dashed #3a2410}
+.vbar em::after{content:'80%';position:absolute;bottom:-17px;left:-14px;font-size:12px;font-style:normal;font-weight:bold}
+.tstats{display:flex;justify-content:center;gap:22px;font-size:15px}
+.tstats b{display:block;font-size:24px;color:#7a2a10}
+.cards{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;padding:8px 4px;margin-top:8px;text-align:left;align-content:start}
+.card{color:var(--ink);background:#fffaf0;border:2px solid #b8955a;border-radius:14px;padding:10px 12px;cursor:pointer;box-shadow:0 3px 0 #8a6a3a;transition:transform .12s;position:relative}
+.card:hover{transform:translateY(-3px)}
+.card.pass{border-color:#3f9b4a;box-shadow:0 3px 0 #2d6b34}
+.card.fail{border-color:#c0503a;box-shadow:0 3px 0 #8a2a1a}
+.card .hd{display:flex;gap:10px;align-items:center}
+.card .hd img{width:58px;height:58px;border-radius:50%;background:#e8d6b0;border:2px solid #b8955a;object-fit:cover}
+.card .nm{font-size:20px;font-weight:bold;line-height:1.1}
+.card .rk{font-size:15px;color:#7a2a10;font-weight:bold}
+.card .pos{position:absolute;right:10px;top:8px;font-size:13px;opacity:.6}
+.card .nums{display:flex;gap:10px;margin:8px 0 6px;font-size:16px;font-weight:bold;align-items:center}
+.card .nums .ok{color:#2a8a3a}.card .nums .no{color:#b8301e}.card .nums .to{color:#8a6a3a}
+.card .nums .acc{margin-left:auto;padding:2px 8px;border-radius:8px;color:#fff;background:#b8301e}
+.card.pass .nums .acc{background:#2a8a3a}
+.card h4{margin:6px 0 2px;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
+.card h4.g{color:#2a7a34}.card h4.w{color:#b8301e}.card h4.t{color:#6a4a1a}
+.card ul{margin:0;padding-left:18px;font-size:14px;line-height:1.3}
+.card .tip{font-style:italic}
+.card .line{font-size:13px;font-style:italic;opacity:.8;margin-top:2px}
+#cardZoom{position:fixed;inset:0;background:#000c;z-index:30;display:grid;place-items:center}
+#cardZoom .card{width:min(900px,92vw);cursor:default;transform:none;padding:26px 32px}
+#cardZoom .card .hd img{width:120px;height:120px}
+#cardZoom .card .nm{font-size:44px}#cardZoom .card .rk{font-size:30px}#cardZoom .card .line{font-size:22px}
+#cardZoom .card .nums{font-size:30px;gap:24px;margin:16px 0}
+#cardZoom .card h4{font-size:22px;margin-top:14px}#cardZoom .card ul{font-size:26px;line-height:1.35}
+#cardZoom .card .pos{font-size:20px}
+#cardZoom .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:40px;padding:10px 18px}
+#cardZoom .nav.l{left:20px}#cardZoom .nav.r{right:20px}
+#cardZoom .close{position:absolute;top:18px;right:22px}
 #credits{font-size:11px;opacity:.6;max-height:60px;overflow:auto}
 </style>
 </head>
@@ -160,7 +190,7 @@ input[type=range]{width:100%}
   <div id="tools"><button class="btn ghost small" id="pauseBtn">⏸ Pause</button></div>
   <div id="feed"></div>
   <div id="bossbar" class="hidden"><div class="n" id="bossName"></div><div class="b"><i id="bossHp"></i></div></div>
-  <div id="teamacc">Team accuracy<br><b id="tacc">–</b></div>
+  <div id="teamacc">Team accuracy<br><b id="tacc">–</b><small>80% needed to pass</small></div>
 </div>
 <div id="banner"><div class="t"></div><div class="s"></div></div>
 
@@ -172,16 +202,18 @@ input[type=range]{width:100%}
   <button class="btn ghost" style="color:var(--ink)" id="muteBtn2">🔊 Sound on/off</button>
 </div></div>
 
+<div id="cardZoom" class="hidden"></div>
 <div id="final" class="ui hidden"><div class="panel">
-  <h1 id="ftitle"></h1><div id="fsub" style="font-size:20px"></div>
-  <div class="podium" id="podium"></div>
+  <h1 id="ftitle"></h1><div id="fsub" style="font-size:19px"></div>
+  <div class="verdict" id="verdict"></div>
   <div class="tstats" id="tstats"></div>
-  <div class="ranking" id="ranking"></div>
-  <div style="display:flex;gap:10px;justify-content:center;margin-top:12px"><button class="btn" id="againBtn">🔁 Play again</button></div>
+  <div class="cards" id="cards"></div>
+  <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;align-items:center"><span style="font-size:14px;opacity:.7">Click a card to show it big</span><button class="btn" id="againBtn">🔁 Play again</button></div>
   <div id="credits">Models: KayKit (Kay Lousberg, CC0) · Quaternius (CC0, incl. Monkroose) · Poly Pizza creators: "Dragon" by jeremy, "Simple Goblin" by Thomas DR, "Bat wing" by Poly by Google (CC-BY) · Questions written in the style of Cambridge English exams (not official material).</div>
 </div></div>
 
 <script src="/shared/upgrades.js"></script>
+<script src="/shared/feedback.js"></script>
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>

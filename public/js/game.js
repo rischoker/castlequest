@@ -166,6 +166,18 @@ export class Game {
     this.horde.wave = 6; this.horde.roar(); S.sfx('warcry');
     this.say('Oh no! Be brave, heroes!', 'sad');
   }
+  // Cada respuesta incorrecta = un golpe directo al castillo. El tamaño depende del grupo:
+  // así, en toda la partida, un grupo que acierta poco pierde el castillo aunque sean pocos estudiantes.
+  penaltySize() { return Math.min(55, Math.max(4, 62 / Math.max(1, this.activePlayers()))) * ({ easy: 0.75, normal: 1, hard: 1.25 }[this.cfg && this.cfg.difficulty] || 1); }
+  penaltyStrike() {
+    const amt = this.penaltySize();
+    // una roca en llamas sale de la horda hacia un tramo visible
+    const segs = this.castle.segments.filter(s => s.side !== 2);
+    const seg = pick(segs.filter(s => s.hp > 0).length ? segs.filter(s => s.hp > 0) : segs);
+    const ang = Math.atan2(seg.n.z, seg.n.x) + rnd(-0.5, 0.5);
+    const from = V(Math.cos(ang) * 32, 0, Math.sin(ang) * 32); from.y = groundY(from.x, from.z) + 2;
+    this.throwRock(from, seg.top.clone().add(V(rnd(-3, 3), 0.5, 0)), amt, seg, { fire: true, penalty: true });
+  }
   maxAmmo() { return 30 + 3 * Math.max(1, this.activePlayers()) + 15 * this.up.carts; }
   // daño por segundo que el castillo podría hacer si el grupo acierta el 70% a su ritmo actual
   expectedDps(base) {
@@ -175,10 +187,17 @@ export class Game {
     else rate = recent.length / Math.min(60, now);
     // las mejoras hacen más eficiente cada virote; la presión crece con el 60% de esa ventaja
     const u = this.up, eff = (1 + 0.2 * u.dmg) * (1 + u.multi) * (1 + 0.4 * u.pierce) * (1 + 0.3 * Math.min(1, u.fire));
+    // los enemigos se ajustan al acierto real del grupo (así no hay avalanchas imposibles);
+    // lo que decide el castillo son los golpes por cada respuesta incorrecta
+    const w = this.mood.window, acc = w.length >= 6 ? Math.min(0.9, Math.max(0.3, w.filter(x => x.ok).length / w.length)) : 0.65;
     if (base) return rate * 0.65 * 3 * 10 + 1.5;
-    return rate * 0.65 * 3 * 10 * (1 + (eff - 1) * 0.6) + 10 * u.catapult + 1.5;
+    return rate * acc * 3 * 10 * (1 + (eff - 1) * 0.6) + 10 * u.catapult + 1.5;
   }
   onVolley() { S.sfx('volley'); }
+  // Regla de la academia: el examen se aprueba con 80% del equipo
+  teamAcc() { const s = this.stats, n = s.correct + s.wrong; return n ? s.correct / n * 100 : 0; }
+  passed() { const s = this.stats; return s.correct + s.wrong > 0 && Math.round(this.teamAcc()) >= (window.FEEDBACK ? window.FEEDBACK.PASS : 80); }
+  bossLimit() { return Math.max(90, (this.cfg ? this.cfg.duration * 60 : 600) * 0.2); }
   activePlayers() { let n = 0; for (const p of this.players.values()) if (p.online) n++; return n; }
 
   finish(win) {
@@ -195,7 +214,13 @@ export class Game {
     } else {
       this.horde.roar(); S.sfx('warcry');
       S.sfx('defeat'); S.sfx('boom'); this.princess.play('sad'); this.say('The castle has fallen...', 'sad', true);
-      for (const s of this.castle.segments) { s.hp = 0; setSegmentLook(s); this.fx.emit('dark', s.center.clone().setY(3), 10, { area: 6 }); }
+      // por debajo del 80% el castillo se derrumba tramo a tramo
+      this.hud.banner('💔 The castle falls…', `Team accuracy ${Math.round(this.teamAcc())}% — 80% was needed`, 'boss');
+      this.castle.segments.slice().sort(() => Math.random() - 0.5).forEach((s, i) => setTimeout(() => {
+        s.hp = 0; setSegmentLook(s); S.sfx('boom'); this.shake = Math.max(this.shake, 0.9);
+        this.fx.emit('dust', s.center.clone().setY(1), 20, { area: 6 }); this.fx.emit('fire', s.center.clone().setY(3), 14, { area: 5 }); this.fx.emit('dark', s.center.clone().setY(3), 10, { area: 6 });
+      }, 250 + i * 320));
+      this.hp = 0;
       for (const pl of this.players.values()) pl.unit.play('death', { once: true });
       for (const e of this.enemies) e.unit.play('cheer');
       this.shake = 1.5;
@@ -229,7 +254,7 @@ export class Game {
   onResult({ pid, qid, correct, golden, silent, streak, points }) {
     const pl = this.players.get(pid);
     const v = this.villagers.get(qid);
-    this.mood.window.push({ t: this.time, ok: correct });
+    if (!silent) this.mood.window.push({ t: this.time, ok: correct });
     if (!silent) this.mood.attempts.push(this.time);
     if (pl) { pl.streak = streak ?? pl.streak; if (points != null) pl.points = points; }
     if (correct) {
@@ -240,11 +265,11 @@ export class Game {
       if (golden) { this.say(pick(['A golden answer! Wonderful!', 'Gold! You are a true hero!']), 'cheer', true); S.sfx('golden'); }
       else if (pl && pl.streak && pl.streak % 5 === 0) this.say(`${pl.name}, ${pl.streak} in a row! Amazing!`, 'cheer', true);
     } else {
-      this.stats.wrong++;
+      if (!silent) this.stats.wrong++;
       if (v) { if (silent) { v.state = 'fade'; v.t = 0; } else { v.state = 'dead'; v.t = 0; v.unit.play('death', { once: true }); S.sfx('death', 0.6); this.fx.text(v.unit.root.position.clone().add(V(0, 2.2, 0)), '✖', 'bad'); } }
       if (!silent) {
         // castigo leve: el castillo pierde un poco
-        this.damageCastle(1.5, null, true);
+        this.penaltyStrike();
         if (pl && pl.unit) { pl.unit.play('hit', { once: true, force: true }); pl.busy = 0.9; }
       }
     }
@@ -254,7 +279,7 @@ export class Game {
     const mult = 1 + 0.4 * this.up.carts;
     const bolts = Math.round((v.golden ? 12 : 3) * mult);
     this.ammo = Math.min(this.maxAmmo(), this.ammo + bolts);
-    const heal = (v.golden ? 20 : 1.5) * mult;
+    const heal = this.penaltySize() * (v.golden ? 3 : (window.__H || 0.2)) * mult;
     this.hp = Math.min(this.maxHp, this.hp + heal);
     // reparar el tramo más dañado
     const segs = this.castle.segments.slice().sort((a, b) => a.hp - b.hp);
@@ -282,7 +307,7 @@ export class Game {
     const pl = this.players.get(pid);
     const U = window.UPGRADES.list[id]; if (!U) return;
     this.up[id] = (this.up[id] || 0) + 1;
-    if (id === 'blessing') { for (const s of this.castle.segments) this.repairSegment(s, 100); this.hp = Math.min(this.maxHp, this.hp + 150); this.princess.play('cheer', { force: true }); this.fx.emit('heart', this.princess.root.position.clone().add(V(0, 2, 0)), 16); }
+    if (id === 'blessing') { for (const s of this.castle.segments) this.repairSegment(s, 100); this.hp = Math.min(this.maxHp, this.hp + this.penaltySize() * 10); this.princess.play('cheer', { force: true }); this.fx.emit('heart', this.princess.root.position.clone().add(V(0, 2, 0)), 16); }
     if (id === 'catapult' && !this.catapults) {
       this.catapults = [];
       for (const [x, z] of [[HALF, HALF], [-HALF, -HALF], [HALF, -HALF], [-HALF, HALF]]) { const c = A.clone('castle/tower_catapult'); c.scale.setScalar(2.2); c.position.set(x, 9.6, z); c.rotation.y = Math.atan2(x, z); this.scene.add(c); this.catapults.push(c); }
@@ -299,12 +324,16 @@ export class Game {
     amt *= isPenalty ? 1 : armor;
     // el muro absorbe la mayor parte del golpe; el castillo pierde una fracción.
     // Amortiguador: si llueven golpes a la vez, cada uno cuenta menos (el castillo cae poco a poco, con drama)
-    let hit = seg ? amt * 0.35 : amt;
-    if (!isPenalty) { this.dmgPressure = (this.dmgPressure || 0) + hit; hit /= 1 + this.dmgPressure / (12 + 2 * Math.max(1, this.activePlayers())); }
-    this.hp = Math.max(0, this.hp - hit);
+    let hit = isPenalty ? amt : seg ? amt * 0.35 : amt;
+    if (!isPenalty) {
+      this.dmgPressure = (this.dmgPressure || 0) + hit; hit /= 1 + this.dmgPressure / (12 + 2 * Math.max(1, this.activePlayers()));
+      // los enemigos desgastan el castillo como mucho a un ritmo fijo: lo que más pesa son las respuestas
+      hit = Math.min(hit, this.dmgBucket ?? 0); this.dmgBucket = (this.dmgBucket ?? 0) - hit;
+    }
+    this.hp = Math.max(this.maxHp * 0.03, this.hp - hit);
     if (window.__dmgLog) { const k = isPenalty ? 'penalty' : (src || 'other'); window.__dmgLog[k] = (window.__dmgLog[k] || 0) + hit; }
     if (seg) {
-      seg.hp = Math.max(0, seg.hp - amt * 1.1);
+      seg.hp = Math.max(isPenalty ? Math.min(seg.hp, 20) : 0, seg.hp - amt * (isPenalty ? 0.3 : 1.1));
       const ch = setSegmentLook(seg);
       if (ch === 'worse') {
         S.sfx(seg.state === 3 ? 'boom' : 'crack'); this.shake = Math.max(this.shake, seg.state === 3 ? 0.9 : 0.35);
@@ -320,7 +349,6 @@ export class Game {
       S.sfx('horn'); this.say('Heroes, this is our last stand! Answer, quickly!', 'sad', true); S.restartMusic('boss');
     }
     if (!this.halfWarned && this.hp < this.maxHp * 0.5) { this.halfWarned = true; this.say('The castle is half destroyed! Hurry!', 'sad', true); }
-    if (this.hp <= 0) this.onLose && this.onLose();
   }
 
   // ---------- Enemigos ----------
@@ -367,7 +395,7 @@ export class Game {
       const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.6, 5), new THREE.MeshStandardMaterial({ color: 0x6b4423 })); stick.rotation.x = Math.PI / 2; broom.add(stick);
       const bristle = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 8), new THREE.MeshStandardMaterial({ color: 0xc9a14a })); bristle.rotation.x = -Math.PI / 2; bristle.position.z = -1.5; broom.add(bristle);
       broom.position.y = 0.75; unit.root.add(broom);
-      unit.model.position.y = 0.3;
+      unit.model.position.y = unit.baseY + 0.3;
     }
   }
   spawnBoss(B, hp) {
@@ -400,6 +428,9 @@ export class Game {
   hurt(e, dmg, { fire, frost, quiet } = {}) {
     if (e.dead) return;
     e.hp -= dmg;
+    // escudo: el jefe no cae mientras el equipo esté por debajo del 80%
+    if (e.isBoss && !this.passed() && e.hp < e.maxHp * 0.12) { e.hp = e.maxHp * 0.12; e.shielded = true; if (!this.shieldWarn || this.time - this.shieldWarn > 25) { this.shieldWarn = this.time; this.hud.banner('🛡️ The boss is shielded!', 'Reach 80% team accuracy to break the shield!', 'boss'); S.sfx('roar'); } }
+    else if (e.isBoss) e.shielded = false;
     if (fire) e.burn = 3; if (frost) e.slow = 2.5;
     if (!quiet && !e.isBoss && !e.D.ram && e.state !== 'climb' && Math.random() < 0.3 && e.unit.action('hit')) { e.unit.play('hit', { once: true, force: true }); e.hitT = 0.4; }
     const hp = e.unit.root.position.clone().add(V(0, e.D.h * 0.6, 0));
@@ -449,7 +480,7 @@ export class Game {
     b.recoil = 1; S.sfx('bolt', 0.7);
     for (const pl of this.players.values()) if (pl.station && pl.station.seg === seg && !pl.busy) { pl.unit.play('shoot', { once: true, force: true }); pl.busy = 0.7; }
   }
-  throwRock(from, to, dmg, seg, { big = false, magic = false, fire = false } = {}) {
+  throwRock(from, to, dmg, seg, { big = false, magic = false, fire = false, penalty = false } = {}) {
     const mesh = magic
       ? new THREE.Mesh(new THREE.SphereGeometry(big ? 0.9 : 0.45, 10, 8), new THREE.MeshBasicMaterial({ color: fire ? 0xff7a1a : 0xb06aff }))
       : A.clone('res/Stone_Chunks_Large');
@@ -457,7 +488,7 @@ export class Game {
     mesh.position.copy(from); this.scene.add(mesh);
     const T = magic ? from.distanceTo(to) / 18 : 1.5;
     const vel = to.clone().sub(from).divideScalar(T); if (!magic) vel.y += 0.5 * 18 * T;
-    this.projectiles.push({ kind: magic ? 'magic' : 'rock', mesh, vel, life: T, grav: magic ? 0 : 18, dmg, seg, to, big, fire });
+    this.projectiles.push({ kind: magic ? 'magic' : 'rock', mesh, vel, life: T, grav: magic ? 0 : 18, dmg, seg, to, big, fire, penalty });
   }
 
   // ---------- Princesa ----------
@@ -488,6 +519,7 @@ export class Game {
   update(dt) {
     this.time += dt;
     if (this.dmgPressure) this.dmgPressure *= Math.exp(-dt / 3);
+    this.dmgBucket = Math.min(18, (this.dmgBucket ?? 0) + dt * (1.3 + 0.12 * Math.max(1, this.activePlayers())));
     for (const pl of this.players.values()) this.updatePlayer(pl, dt);
     this.princess.update(dt); swayBraid(this.braid, dt);
     this.updateMood(dt);
@@ -511,7 +543,7 @@ export class Game {
       for (const e of this.enemies) { if (e.dead || !e.inside) continue; const d = e.unit.root.position.distanceTo(u.root.position); if (d < bd) { bd = d; foe = e; } }
       if (foe) {
         u.faceTo(foe.unit.root.position.x, foe.unit.root.position.z, dt);
-        if (!pl.busy) { u.play('attack', { once: true, force: true }); pl.busy = 0.9; this.hurt(foe, 7); }
+        if (!pl.busy) { u.play('attack', { once: true, force: true }); pl.busy = 0.9; this.fx.emit('spark', foe.unit.root.position.clone().add(V(0, 1.2, 0)), 3); }
         return;
       }
     }
@@ -552,6 +584,10 @@ export class Game {
     if (this.wave < WAVES.length) {
       this.waveT += dt;
       if (this.waveT >= this.waveLen) { this.nextWave(); return; }
+    } else if (!this.bossDead) {
+      // límite de tiempo del jefe: al acabarse, el examen termina y decide el 80%
+      this.waveT += dt;
+      if (this.waveT >= this.bossLimit()) { this.bossDead = true; this.onTimeUp && this.onTimeUp(); return; }
     }
     // presupuesto de aparición: escala con jugadores conectados y con la oleada
     const n = Math.max(1, this.activePlayers());
@@ -578,7 +614,13 @@ export class Game {
       const { def, hp } = this.escortPending; this.escortPending = null;
       this.spawnBoss(def, hp); this.hud.banner('BOSS', def.name + ' joins the battle!', 'boss'); S.sfx('roar');
     }
-    if (this.up.mason) { this.hp = Math.min(this.maxHp, this.hp + dt * 1.2 * this.up.mason); for (const s of this.castle.segments) if (s.hp > 0 && s.hp < s.maxHp) s.hp = Math.min(s.maxHp, s.hp + dt * 0.6 * this.up.mason); }
+    // el castillo refleja el examen: por debajo del 80% el castillo no puede estar sano
+    const ans = this.stats.correct + this.stats.wrong;
+    if (ans >= 10) {
+      const acc = this.teamAcc(), cap = this.maxHp * Math.max(0.03, 1 - Math.max(0, 80 - acc) * 0.045);
+      if (this.hp > cap) this.hp -= Math.min(this.hp - cap, (this.hp - cap) * dt * 0.6 + dt * 4);
+    }
+    if (this.up.mason) { for (const s of this.castle.segments) if (s.hp > 0 && s.hp < s.maxHp) s.hp = Math.min(s.maxHp, s.hp + dt * 0.6 * this.up.mason); }
     if (this.up.catapult && this.catapults) {
       this.catT -= dt;
       if (this.catT <= 0) {
@@ -620,7 +662,7 @@ export class Game {
         if (b.cd <= 0 && Math.abs(d) < 0.25 && this.phase === 'playing') {
           // sin virotes la tripulación dispara despacio con lo que queda
           if (this.ammo > 0) { b.cd = rate * rnd(0.9, 1.1); this.ammo--; this.fireBolt(seg, b.target); }
-          else { b.cd = rate * 3.5 * rnd(0.9, 1.1); this.fireBolt(seg, b.target, true); }
+          // sin virotes no hay disparo: el daño a los enemigos solo sale de las respuestas correctas
         }
       }
     }
@@ -656,6 +698,7 @@ export class Game {
           for (const m of this.horde.members) if (m.state === 'hold' && Math.hypot(m.x - p.mesh.position.x, m.z - p.mesh.position.z) < 1.6) this.horde.kill(m);
         }
       } else if (p.kind === 'magic' && Math.random() < 0.6) this.fx.emit(p.fire ? 'fire' : 'magic', p.mesh.position, 1);
+      else if (p.kind === 'rock' && p.fire) { this.fx.emit('fire', p.mesh.position, 2, { scale: 1.3 }); if (Math.random() < 0.5) this.fx.emit('smoke', p.mesh.position, 1); }
       if (p.life <= 0) {
         if (p.kind === 'rock' || p.kind === 'magic') {
           if (p.friendly) {
@@ -664,8 +707,16 @@ export class Game {
           } else {
             this.fx.emit(p.kind === 'magic' ? (p.fire ? 'fire' : 'magic') : 'dust', p.mesh.position, p.big ? 20 : 10, { area: p.big ? 3 : 1 });
             S.sfx(p.kind === 'magic' ? (p.fire ? 'fire' : 'spell') : 'crack', 0.6); this.shake = Math.max(this.shake, p.big ? 0.6 : 0.2);
-            this.damageCastle(p.dmg, p.seg && p.seg.hp > 0 ? p.seg : null, false, 'proj:' + p.kind);
-            if (p.fire && p.seg) p.seg.burning = 6;
+            if (p.penalty) {
+              // golpe por respuesta incorrecta: siempre cuenta completo
+              this.damageCastle(p.dmg, p.seg, true, 'penalty');
+              this.fx.text(p.mesh.position.clone().add(V(0, 2, 0)), `-${(p.dmg / this.maxHp * 100).toFixed(1)}%`, 'bad');
+              this.fx.emit('fire', p.mesh.position, 14, { area: 2 });
+              if (p.seg) p.seg.burning = Math.max(p.seg.burning || 0, 2);
+            } else {
+              this.damageCastle(p.dmg, p.seg && p.seg.hp > 0 ? p.seg : null, false, 'proj:' + p.kind);
+              if (p.fire && p.seg) p.seg.burning = 6;
+            }
           }
         }
         p.mesh.removeFromParent(); this.projectiles.splice(i, 1);
@@ -757,9 +808,14 @@ export class Game {
         }
       } else if (e.state === 'climb') {
         e.climbT += dt;
-        const k = Math.min(1, e.climbT / 3.6);
+        // sube por peldaños: un tirón, una pausa, otro tirón… inclinado hacia la escalera
+        const k0 = Math.min(1, e.climbT / 3.6), steps = 9, sk = k0 * steps, si = Math.floor(sk), sf = sk - si;
+        const k = Math.min(1, (si + Math.min(1, Math.max(0, (sf - 0.35) / 0.65)) ** 0.6) / steps);
         pos.copy(e.climbFrom).lerp(e.climbTo, k);
+        u.model.rotation.x = 0.28 + Math.sin(sk * Math.PI * 2) * 0.05;
+        u.model.position.x = Math.sin(sk * Math.PI) * 0.08;
         if (k >= 1) {
+          u.model.rotation.x = 0; u.model.position.x = 0;
           // llega arriba: golpe fuerte y salta adentro
           this.damageCastle(28, seg, false, 'ladder'); this.shake = 0.5; S.sfx('crack');
           this.fx.text(pos.clone().add(V(0, 2.5, 0)), 'Climbed in!', 'bad');
@@ -828,7 +884,7 @@ export class Game {
     l.obj = holder; e.ladder = l;
     // la escalera inclinada: rotamos el holder en X para que caiga hacia afuera al soltarse
     e.state = 'climb'; e.climbT = 0; e.climbFrom = e.unit.root.position.clone(); e.climbTo = base.clone().addScaledVector(seg.n, -1.4).setY(WALK_Y + 0.4);
-    e.unit.play('walk', { speed: 0.6 }); e.unit.faceTo(seg.center.x, seg.center.z);
+    e.unit.play('walk', { speed: 1.5 }); e.unit.faceTo(seg.center.x, seg.center.z);
     S.sfx('whoosh', 0.4);
   }
   updateFlyer(e, dt, spd) {
@@ -858,7 +914,7 @@ export class Game {
       const to = target.clone().sub(pos); const d = to.length();
       if (d > 0.5) pos.addScaledVector(to.normalize(), Math.min(d, Math.max(spd, d * 0.5) * dt * (e.slow > 0 ? 0.6 : 1)));
       u.faceTo(pos.x + to.x, pos.z + to.z, dt, 3);
-      u.model.rotation.z = Math.sin(e.t * 2) * 0.12; u.model.position.y = Math.sin(e.t * 3) * 0.4;
+      u.model.rotation.z = Math.sin(e.t * 2) * 0.12; u.model.position.y = u.baseY + Math.sin(e.t * 3) * 0.4;
       if (e.special <= 0) {
         e.special = 4.5;
         const s = this.pickVisibleSegment(pos);

@@ -27,7 +27,9 @@ function optimizeModel(model, key) {
   model.traverse(o => {
     if (!o.isSkinnedMesh || !o.visible || Array.isArray(o.material)) return;
     // cada pieza trae su propio objeto Skeleton, pero comparten los mismos huesos
-    const k = o.skeleton.bones.map(b => b.uuid).join(',') + (o.material.map ? '|map' : '|col');
+    // …y además deben tener las mismas matrices inversas (el arma del orco, por ejemplo, trae otras)
+    const inv = o.skeleton.boneInverses.map(m => m.elements.map(x => x.toFixed(3)).join(',')).join(';');
+    const k = o.skeleton.bones.map(b => b.uuid).join(',') + '#' + inv + (o.material.map ? '|map' : '|col');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(o);
   });
@@ -98,8 +100,27 @@ function mergeStaticModel(model, key) {
   model.add(new THREE.Mesh(entry.geo, entry.mat));
 }
 
+// armas de cada personaje (pack de armas KayKit), en los huesos "handslot" de la mano
+const LOADOUT = {
+  Knight: { r: 'sword_A', l: 'shield_A' }, Barbarian: { r: 'axe_B' }, Mage: { r: 'staff_A' }, Ranger: { l: 'bow_A_withString' },
+  Rogue: { r: 'dagger_A', l: 'dagger_B' }, Rogue_Hooded: { r: 'dagger_B', l: 'dagger_A' },
+  Skeleton_Warrior: { r: 'sword_B', l: 'shield_B' }, Skeleton_Minion: { r: 'axe_A' }, Skeleton_Rogue: { r: 'dagger_A' }, Skeleton_Mage: { r: 'staff_B' },
+};
+function attachWeapons(model, loadout, shadow) {
+  if (!loadout) return;
+  const bones = {};
+  // (el cargador quita los puntos de los nombres: "handslot.r" queda "handslotr")
+  model.traverse(o => { if (o.isBone && /^handslot\.?[lr]$/.test(o.name)) bones[o.name.slice(-1)] = o; });
+  for (const side of ['r', 'l']) {
+    const w = loadout[side]; if (!w || !bones[side] || !A.has('weapons/' + w)) continue;
+    const m = A.clone('weapons/' + w);
+    m.traverse(o => { if (o.isMesh) { o.castShadow = shadow; o.frustumCulled = false; } });
+    bones[side].add(m);
+  }
+}
+
 export class Unit {
-  constructor(key, { height = 1.8, tint, tintAmt = 0.4, emissive, optimize = true, shadow = true } = {}) {
+  constructor(key, { height = 1.8, tint, tintAmt = 0.4, emissive, optimize = true, shadow = true, weapons = true } = {}) {
     this.key = key;
     const short = key.split('/')[1];
     this.isKay = KAY.has(short);
@@ -109,6 +130,18 @@ export class Unit {
     if (tint) A.tint(this.model, tint, tintAmt, emissive);
     this.model.traverse(o => { if (o.isMesh) { o.castShadow = shadow; o.frustumCulled = false; } });
     A.fitHeight(this.model, height);
+    // apoyar los pies en el suelo (algunos modelos traen el origen más arriba o más abajo de los pies)
+    this.model.updateMatrixWorld(true);
+    let minY = Infinity; const box = new THREE.Box3();
+    this.model.traverse(o => {
+      if (!o.isMesh || !o.visible) return;
+      if (o.isSkinnedMesh) { o.computeBoundingBox(); box.copy(o.boundingBox).applyMatrix4(o.matrixWorld); }
+      else { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld); }
+      minY = Math.min(minY, box.min.y);
+    });
+    if (isFinite(minY) && Math.abs(minY) > 0.02) this.model.position.y -= minY;
+    this.baseY = this.model.position.y;
+    if (weapons) attachWeapons(this.model, typeof weapons === 'object' ? weapons : LOADOUT[short], shadow);
     this.root.add(this.model);
     this.height = height;
     this.mixer = new THREE.AnimationMixer(this.model);
@@ -144,7 +177,7 @@ export class Unit {
     if (this.static) {
       // modelos sin animaciones: balanceo procedural para que se vean vivos
       const m = this.model, moving = this.cur === 'walk' || this.cur === 'run';
-      m.position.y = moving ? Math.abs(Math.sin(this.t * 8)) * 0.15 * this.height : Math.sin(this.t * 2) * 0.03 * this.height;
+      m.position.y = this.baseY + (moving ? Math.abs(Math.sin(this.t * 8)) * 0.15 * this.height : Math.sin(this.t * 2) * 0.03 * this.height);
       m.rotation.z = moving ? Math.sin(this.t * 8) * 0.12 : 0;
       if (this.cur === 'attack') m.rotation.x = Math.max(0, Math.sin(this.t * 6)) * 0.35;
       else if (this.cur !== 'death') m.rotation.x = 0;
@@ -206,7 +239,7 @@ function blondeHair(tex) {
 
 // La princesa: maga sin sombrero, vestido rosa, corona y una trenza larguísima.
 export function makePrincess() {
-  const u = new Unit('chars/Mage', { height: 2.6, optimize: false });
+  const u = new Unit('chars/Mage', { height: 2.6, optimize: false, weapons: false });
   u.model.traverse(o => {
     if (!o.isMesh) return;
     if (/Hat/i.test(o.name)) { o.visible = false; return; }
