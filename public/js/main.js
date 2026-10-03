@@ -1,0 +1,240 @@
+// Pantalla del profesor (host): escena 3D, lobby, HUD y conexión con el servidor.
+import * as THREE from 'three';
+import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import * as A from './assets.js';
+import * as S from './audio.js';
+import { FX } from './fx.js';
+import { buildSky, buildLights, buildGround, buildScenery, buildCastle, HALF } from './world.js';
+import { Game, esc, WAVES } from './game.js';
+
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const ss = { get(k) { try { return sessionStorage.getItem(k); } catch { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch { } } };
+const ls = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
+
+// ---------- Render ----------
+const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true, powerPreference: 'high-performance' });
+let pixelRatio = params.has('lite') ? 0.5 : Math.min(window.devicePixelRatio, 1.5);
+renderer.setPixelRatio(pixelRatio);
+renderer.shadowMap.enabled = !params.has('lite'); renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const labels = new CSS2DRenderer({ element: $('labels') });
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 600);
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); labels.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+let game, fx, sceneryRefs;
+const state = { code: null, key: ss.get('cq_host_key'), level: ls.get('cq_level') || 'A2', tq: +(ls.get('cq_tq') || 20), dur: +(ls.get('cq_dur') || 10), gold: ls.get('cq_gold') !== '0', diff: ls.get('cq_diff') || 'normal', paused: false, players: new Map() };
+
+// ---------- HUD ----------
+const hud = {
+  banner(t, s, cls = '') { const b = $('banner'); b.className = ''; void b.offsetWidth; b.className = 'show ' + cls; b.querySelector('.t').innerHTML = t; b.querySelector('.s').innerHTML = s || ''; b.querySelector('.s').style.display = s ? '' : 'none'; },
+  feed(html, cls = '') { const f = $('feed'); const d = document.createElement('div'); d.className = cls; d.innerHTML = html; f.appendChild(d); while (f.children.length > 5) f.firstChild.remove(); setTimeout(() => d.remove(), 9000); },
+  upgrades(up) { $('ups').innerHTML = Object.entries(up).filter(([, n]) => n > 0).map(([k, n]) => `<span title="${window.UPGRADES.list[k].name}">${window.UPGRADES.list[k].icon}${n > 1 ? '×' + n : ''}</span>`).join(''); },
+  update(g) {
+    if (g.phase === 'lobby') return;
+    const k = g.hp / g.maxHp, bar = $('hpbar').firstElementChild;
+    bar.style.transform = `scaleX(${k})`; bar.className = k < 0.3 ? 'low' : k < 0.6 ? 'mid' : '';
+    $('hptext').textContent = `🏰 Castle ${Math.ceil(k * 100)}%`;
+    $('ammoN').textContent = g.ammo; $('ammo').className = g.ammo <= 0 ? 'empty' : '';
+    $('ammo').querySelector('small').textContent = g.ammo <= 0 ? 'OUT OF BOLTS! Answer to send more!' : 'bolts';
+    if (g.wave < 6) { $('wave').textContent = `Wave ${g.wave + 1}/6 · ${g.breakT > 0 ? 'Get ready…' : (window.WAVE_TITLES || [])[g.wave] || ''}`; $('waveprog').firstElementChild.style.width = Math.min(100, g.waveT / g.waveLen * 100) + '%'; $('waveprog').style.display = ''; }
+    else { $('wave').textContent = '⚔️ Final battle!'; $('waveprog').style.display = 'none'; }
+    const bosses = g.enemies.filter(e => e.isBoss && !e.dead);
+    $('bossbar').classList.toggle('hidden', !bosses.length);
+    if (bosses.length) { const b = bosses[0]; $('bossName').textContent = '☠️ ' + b.boss.name; $('bossHp').style.width = Math.max(0, b.hp / b.maxHp * 100) + '%'; }
+    const tot = g.stats.correct + g.stats.wrong; $('tacc').textContent = tot ? Math.round(g.stats.correct / tot * 100) + '%' : '–';
+  },
+};
+
+// ---------- Carga ----------
+async function boot() {
+  buildSky(scene); buildLights(scene); buildGround(scene);
+  await A.loadAll(p => { $('loadbar').firstElementChild.style.width = (p * 100).toFixed(0) + '%'; });
+  sceneryRefs = buildScenery(scene);
+  const castle = buildCastle(scene);
+  fx = new FX(scene);
+  game = new Game({ scene, camera, castle, fx, hud });
+  window.WAVE_TITLES = WAVES.map(w => w.title);
+  game.onWin = () => endBattle(true);
+  game.onLose = () => endBattle(false);
+  $('loadtxt').textContent = 'Ready!';
+  $('clickStart').classList.remove('hidden');
+  window.__game = game; // depuración
+  window.__sim = async (sec, dt = 1 / 30) => { for (let i = 0; i < sec / dt; i++) { game.update(dt); fx.update(dt); if (i % 10 === 0) await new Promise(r => setTimeout(r, 0)); } };
+  window.done = true;
+  if (params.has('auto')) enter();
+  if (params.has('noui')) document.querySelectorAll('.ui').forEach(e => e.style.display = 'none');
+}
+function enter() {
+  S.init(); S.resume(); S.music('calm');
+  $('loading').classList.add('hidden');
+  showLobby();
+  connect();
+}
+$('clickStart').onclick = enter;
+
+// ---------- Lobby ----------
+function segButtons(id, val, cb) {
+  const el = $(id);
+  const paint = v => el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === String(v)));
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { S.sfx('click'); cb(b.dataset.v); paint(b.dataset.v); });
+  paint(val);
+}
+segButtons('lvl', state.level, v => { state.level = v; ls.set('cq_level', v); loadTop(); });
+segButtons('dur', state.dur, v => { state.dur = +v; ls.set('cq_dur', v); });
+segButtons('diff', state.diff, v => { state.diff = v; ls.set('cq_diff', v); });
+segButtons('gold', state.gold ? 1 : 0, v => { state.gold = v === '1'; ls.set('cq_gold', v); });
+$('tq').value = state.tq; $('tlab').textContent = state.tq;
+$('tq').oninput = () => { state.tq = +$('tq').value; $('tlab').textContent = state.tq; ls.set('cq_tq', state.tq); };
+$('startBtn').onclick = () => {
+  if (!state.players.size) { hud.banner('No defenders yet!', 'Scan the QR code with your phones'); return; }
+  S.sfx('horn'); send({ t: 'start', level: state.level, timeBase: state.tq, golden: state.gold });
+  startBattle();
+};
+const toggleMute = () => { S.setMuted(!S.isMuted()); $('muteBtn').textContent = S.isMuted() ? '🔇 Muted' : '🔊 Sound'; };
+$('muteBtn').onclick = toggleMute; $('muteBtn2').onclick = toggleMute;
+// si venimos del Arcade, botón para volver
+const backUrl = (() => { try { const r = document.referrer && new URL(document.referrer); if (r && r.origin !== location.origin) { ss.set('cq_back', r.href); return r.href; } } catch { } return ss.get('cq_back'); })();
+if (backUrl) { $('arcadeBtn').classList.remove('hidden'); $('arcadeBtn').onclick = () => { location.href = backUrl; }; }
+$('fsBtn').onclick = () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); };
+
+function showLobby() {
+  game.phase = 'lobby'; game.reset(); game.layoutLobby();
+  for (const pl of game.players.values()) pl.unit.play('idle');
+  $('lobby').classList.remove('hidden'); $('plist').classList.remove('hidden');
+  $('hud').classList.add('hidden'); $('final').classList.add('hidden'); $('pauseO').classList.add('hidden');
+  game.princess.play('idle');
+  loadTop();
+  S.restartMusic('calm');
+}
+function renderPlayers() {
+  $('pcount').textContent = state.players.size;
+  $('pc2').textContent = state.players.size + ' defenders';
+  const rows = [...state.players.values()].map(p => `<div class="pl"><img src="/assets/portraits/${p.char}.png"><span class="${p.online ? '' : 'off'}">${esc(p.name)}</span><button data-k="${p.id}" title="Remove">✖</button></div>`).join('');
+  $('plrows').innerHTML = rows || '<div style="text-align:center;opacity:.6">Scan the QR code to join!</div>';
+  $('plrows').querySelectorAll('button').forEach(b => b.onclick = () => send({ t: 'kick', pid: b.dataset.k }));
+}
+async function loadTop() {
+  $('gtlv').textContent = state.level === 'MIX' ? 'Final exam' : state.level;
+  try {
+    const rows = await fetch('/api/top?level=' + state.level + '&limit=5').then(r => r.json());
+    $('gtop').innerHTML = rows.length ? rows.map((r, i) => `<div class="row"><span>${['🥇', '🥈', '🥉', '4', '5'][i]}</span><span>${esc(r.name)}</span><span>${r.points}</span></div>`).join('') : '<div style="opacity:.6">No scores yet</div>';
+  } catch { $('gtop').textContent = '—'; }
+}
+
+// ---------- Batalla ----------
+let countdown = 0;
+function startBattle() {
+  $('lobby').classList.add('hidden'); $('plist').classList.add('hidden'); $('final').classList.add('hidden');
+  $('hud').classList.remove('hidden'); $('feed').innerHTML = '';
+  game.start({ level: state.level, timeBase: state.tq, duration: state.dur, golden: state.gold, difficulty: state.diff });
+  hud.upgrades(game.up);
+}
+function endBattle(win) {
+  if (game.phase !== 'playing') return;
+  game.finish(win);
+  send({ t: 'end', win });
+}
+function showFinal(win, ranking) {
+  $('ftitle').textContent = win ? '👑 Victory!' : '💔 The castle fell…';
+  $('fsub').textContent = win ? 'The princess is safe. You passed the exam, heroes!' : 'Study hard and try again, heroes!';
+  const top = ranking.slice(0, 3); const order = [top[1], top[0], top[2]];
+  $('podium').innerHTML = order.map((r, i) => r ? `<div class="pod"><img src="/assets/portraits/${r.char}.png"><b style="font-size:22px">${esc(r.name)}</b><div>${r.points} pts · ${r.accuracy}%</div><div class="blk" style="height:${[90, 130, 60][i]}px">${['🥈', '🥇', '🥉'][i]}</div></div>` : '<div class="pod"></div>').join('');
+  $('ranking').innerHTML = ranking.slice(3, 23).map(r => `<div><span>#${r.rank}</span><span>${esc(r.name)}</span><span>${r.points} · ${r.accuracy}%</span></div>`).join('');
+  const s = game.stats, tot = s.correct + s.wrong;
+  $('tstats').innerHTML = `<div><b>${tot ? Math.round(s.correct / tot * 100) : 0}%</b>team accuracy</div><div><b>${s.correct}</b>correct answers</div><div><b>${s.golden}</b>golden answers</div><div><b>${s.kills}</b>monsters defeated</div><div><b>${Math.ceil(game.hp / game.maxHp * 100)}%</b>castle left</div>`;
+  setTimeout(() => { $('final').classList.remove('hidden'); $('hud').classList.add('hidden'); }, 3500);
+}
+$('againBtn').onclick = () => { send({ t: 'lobby' }); showLobby(); };
+function setPause(on) {
+  if (game.phase !== 'playing') return;
+  state.paused = on; $('pauseO').classList.toggle('hidden', !on); send({ t: 'pause', on });
+}
+$('pauseBtn').onclick = () => setPause(true);
+$('resumeBtn').onclick = () => setPause(false);
+$('skipBtn').onclick = () => { setPause(false); game.nextWave(); };
+$('endBtn').onclick = () => { setPause(false); endBattle(game.hp > game.maxHp * 0.5); };
+addEventListener('keydown', e => { if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { if (game && game.phase === 'playing') setPause(!state.paused); } });
+
+// ---------- Red ----------
+let ws, backoff = 500;
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => { backoff = 500; send({ t: 'host', code: ss.get('cq_host_code'), key: ss.get('cq_host_key') }); };
+  ws.onclose = () => setTimeout(connect, backoff = Math.min(backoff * 1.6, 5000));
+  ws.onmessage = e => onMsg(JSON.parse(e.data));
+  setInterval(() => send({ t: 'ping' }), 20000);
+}
+function onMsg(m) {
+  if (m.t === 'room') {
+    state.code = m.code; ss.set('cq_host_code', m.code); ss.set('cq_host_key', m.key);
+    const url = `${location.origin}/play?code=${m.code}`;
+    $('code').textContent = m.code; $('code2').textContent = m.code; $('url').textContent = `${location.host}/play`;
+    $('qr').src = '/qr.svg?text=' + encodeURIComponent(url); $('qr2').src = $('qr').src;
+    for (const p of m.players) { state.players.set(p.id, p); game.addPlayer(p); }
+    renderPlayers();
+    return;
+  }
+  if (m.t === 'player_join' || m.t === 'player_update') { state.players.set(m.p.id, m.p); game.addPlayer(m.p); renderPlayers(); if (m.t === 'player_join' && game.phase === 'playing') hud.feed(`🛡️ <b>${esc(m.p.name)}</b> joined the defense!`, 'good'); return; }
+  if (m.t === 'player_leave') { state.players.delete(m.pid); game.removePlayer(m.pid); renderPlayers(); return; }
+  if (m.t === 'q_spawn') return game.onQuestion(m);
+  if (m.t === 'q_result') return game.onResult(m);
+  if (m.t === 'upgrade') return game.onUpgrade(m);
+  if (m.t === 'final') return showFinal(m.win, m.ranking);
+}
+
+// ---------- Cámara y bucle ----------
+const clock = new THREE.Clock();
+const GAME_CAM = new THREE.Vector3(-21, 40, 52), GAME_LOOK = new THREE.Vector3(1, 0, 7);
+const camPos = GAME_CAM.clone(), camLook = GAME_LOOK.clone();
+let orbit = 0, fpsN = 0, fpsT = 0;
+let camOverride = params.get('cam') && params.get('cam').split(',').map(Number);
+window.__cam = v => camOverride = v;
+function updateCamera(dt) {
+  if (camOverride) { camera.position.set(camOverride[0], camOverride[1], camOverride[2]); camera.lookAt(camOverride[3], camOverride[4], camOverride[5]); return; }
+  const want = new THREE.Vector3(), look = new THREE.Vector3(0, 2, 0);
+  if (!game || game.phase === 'lobby') {
+    orbit += dt * 0.08;
+    const n = game ? game.players.size : 0, far = n > 20 ? 1.35 : n > 10 ? 1.15 : 1;
+    const a = Math.sin(orbit) * 0.35 - 0.1;
+    want.set(Math.sin(a) * 24 * far + 2, 10 + 3 * far, Math.cos(a) * 24 * far + 21); look.set(1, 3.5, 14);
+  } else if (game.focus && game.focus.t > 0) {
+    game.focus.t -= dt;
+    const p = game.focus.target.position;
+    want.copy(p).add(new THREE.Vector3(0, 10, 22)).lerp(GAME_CAM, 0.35); look.copy(p).setY(p.y + 3);
+  } else {
+    const t = clock.elapsedTime;
+    want.copy(GAME_CAM).add(new THREE.Vector3(Math.sin(t * 0.07) * 3, 0, Math.cos(t * 0.05) * 2)); look.copy(GAME_LOOK);
+  }
+  camPos.lerp(want, Math.min(1, dt * 1.5)); camLook.lerp(look, Math.min(1, dt * 2));
+  camera.position.copy(camPos);
+  if (game && game.shake > 0) { game.shake = Math.max(0, game.shake - dt * 1.8); const s = game.shake * 0.6; camera.position.add(new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s)); }
+  camera.lookAt(camLook);
+}
+// calidad adaptativa: si el PC del salón va lento, bajamos resolución y sombras
+let slowSecs = 0;
+function adaptQuality(fps) {
+  if (params.has('lite') || params.has('hq')) return;
+  slowSecs = fps < 28 ? slowSecs + 1 : 0;
+  if (slowSecs >= 4) {
+    slowSecs = 0;
+    if (pixelRatio > 0.8) { pixelRatio = Math.max(0.75, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); resize(); console.log('[quality] pixelRatio', pixelRatio); }
+    else if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); console.log('[quality] shadows off'); }
+  }
+}
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, clock.getDelta());
+  fpsN++; fpsT += dt; if (fpsT > 1) { window.__fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; adaptQuality(window.__fps); }
+  if (game && !state.paused) {
+    game.update(dt); fx.update(dt);
+    for (const c of sceneryRefs.clouds) { c.position.x += dt * 1.2; if (c.position.x > 160) c.position.x = -160; }
+  }
+  updateCamera(dt);
+  renderer.render(scene, camera); labels.render(scene, camera);
+}
+boot().then(loop);
