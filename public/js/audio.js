@@ -2,7 +2,7 @@
 // Si luego tienes sonidos reales, ponlos en /assets/sfx/<nombre>.mp3 y se usan automáticamente.
 let ctx, master, sfxBus, musicBus, noiseBuf, muted = false;
 const files = {};
-const FILE_SFX = ['bolt', 'hit', 'crack', 'gate', 'horn', 'roar', 'cheer', 'sob', 'victory', 'defeat', 'coin', 'death', 'boom', 'build', 'whoosh', 'golden'];
+const FILE_SFX = ['thunder', 'warcry', 'volley', 'heart', 'drum', 'bolt', 'hit', 'crack', 'gate', 'horn', 'roar', 'cheer', 'sob', 'victory', 'defeat', 'coin', 'death', 'boom', 'build', 'whoosh', 'golden'];
 
 export function init() {
   if (ctx) return;
@@ -43,7 +43,7 @@ export function sfx(name, vol = 1) {
   if (!ctx || muted) return;
   const now = ctx.currentTime;
   // evita saturar con el mismo sonido muchas veces por frame
-  const gap = { bolt: 0.05, hit: 0.04, death: 0.08, crack: 0.25, coin: 0.06 }[name] || 0;
+  const gap = { bolt: 0.05, hit: 0.04, death: 0.08, crack: 0.25, coin: 0.06, volley: 1, warcry: 2 }[name] || 0;
   if (gap && last[name] && now - last[name] < gap) return; last[name] = now;
   if (playFile(name, vol)) return;
   const t = now;
@@ -67,6 +67,11 @@ export function sfx(name, vol = 1) {
     case 'click': tone(1200, t, 0.04, { type: 'square', vol: 0.04 * vol }); break;
     case 'join': tone(660, t, 0.1, { type: 'triangle', vol: 0.1 * vol }); tone(990, t + 0.08, 0.2, { type: 'triangle', vol: 0.1 * vol }); break;
     case 'fire': noise(t, 1.2, { vol: 0.35 * vol, freq: 700, q: 0.5, slide: 0.5 }); break;
+    case 'thunder': noise(t, 2.6, { vol: 0.8 * vol, freq: 260, slide: 0.25 }); noise(t + 0.05, 0.3, { vol: 0.5 * vol, freq: 2000, type: 'highpass' }); tone(42, t, 2.2, { vol: 0.35 * vol, slide: 0.7, attack: 0.05 }); break;
+    case 'warcry': for (let i = 0; i < 10; i++) { const f = 90 + Math.random() * 90; tone(f, t + Math.random() * 0.25, 1.4, { type: 'sawtooth', vol: 0.025 * vol, slide: 0.8, attack: 0.15 }); } noise(t, 1.5, { vol: 0.22 * vol, freq: 500, q: 1.5, type: 'bandpass', slide: 0.6 }); break;
+    case 'volley': for (let i = 0; i < 12; i++) noise(t + Math.random() * 0.35, 0.18, { vol: 0.07 * vol, freq: 1800 + Math.random() * 1500, type: 'bandpass', q: 4, slide: 0.4 }); break;
+    case 'heart': tone(55, t, 0.16, { vol: 0.5 * vol, slide: 0.6 }); tone(50, t + 0.22, 0.2, { vol: 0.4 * vol, slide: 0.6 }); break;
+    case 'drum': tone(70, t, 0.35, { vol: 0.35 * vol, slide: 0.5 }); noise(t, 0.12, { vol: 0.2 * vol, freq: 300 }); break;
     case 'spell': tone(400, t, 0.6, { type: 'sine', vol: 0.08 * vol, slide: 3 }); tone(600, t, 0.6, { type: 'triangle', vol: 0.05 * vol, slide: 2 }); break;
   }
 }

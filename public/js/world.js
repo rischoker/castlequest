@@ -23,39 +23,95 @@ export function buildLights(scene) {
   const hemi = new THREE.HemisphereLight(0xdcefff, 0x5a6b3a, 1.25); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
   sun.position.set(-30, 55, 35); sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(window.__weakGPU ? 1024 : 2048, window.__weakGPU ? 1024 : 2048);
   const s = sun.shadow.camera; s.left = -42; s.right = 42; s.top = 42; s.bottom = -42; s.near = 5; s.far = 140;
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
   scene.add(sun);
   return { hemi, sun };
 }
 
+// ---------- Relieve ----------
+// El castillo está sobre una meseta plana; alrededor el terreno baja hacia el campo de batalla,
+// lo cruza un río por el sur y al fondo sube hacia las montañas.
+export const RIVER_Z = x => 43 + Math.sin(x * 0.045) * 4 + Math.sin(x * 0.13) * 1.2;
+export const ROAD_X = z => GATE_POS.x + Math.sin(z * 0.08) * 3;
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function baseY(x, z) {
+  const d = Math.pow(Math.pow(Math.abs(x), 4) + Math.pow(Math.abs(z), 4), 0.25); // distancia "cuadrada redondeada"
+  const t = smooth(17, 31, d);
+  const n = Math.sin(x * 0.11) * Math.cos(z * 0.13) * 0.8 + Math.sin(x * 0.031 + z * 0.047) * 0.7 + Math.sin(x * 0.27 + 1.3) * Math.sin(z * 0.23) * 0.25;
+  const r = Math.hypot(x, z);
+  return -3.2 * t + t * n * 1.1 + Math.max(0, r - 95) * 0.11;
+}
+export function groundY(x, z) {
+  let y = baseY(x, z);
+  const dz = z - RIVER_Z(x), w = 4.2;
+  if (Math.abs(dz) < w) y -= (1 - (dz / w) ** 2) * 1.8;
+  return y;
+}
+export function waterY(x) { return baseY(x, RIVER_Z(x)) - 0.95; }
+
+// textura de detalle (pasto) que se repite sobre los colores del terreno
+function grassTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'); g.fillStyle = '#e8e8e8'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256, l = 3 + Math.random() * 7, v = Math.random();
+    g.strokeStyle = v < 0.5 ? `rgba(40,60,20,${0.08 + Math.random() * 0.12})` : `rgba(255,255,230,${0.1 + Math.random() * 0.15})`;
+    g.lineWidth = 1 + Math.random(); g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 3, y - l); g.stroke();
+  }
+  for (let i = 0; i < 90; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.06})`; g.beginPath(); g.arc(Math.random() * 256, Math.random() * 256, 4 + Math.random() * 14, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(70, 70); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+
 export function buildGround(scene) {
-  // terreno con ondulaciones suaves fuera del área de juego y color variado
-  const geo = new THREE.PlaneGeometry(520, 520, 180, 180);
+  const geo = new THREE.PlaneGeometry(520, 520, 230, 230);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position, col = [];
-  const c1 = new THREE.Color(0x6fae4a), c2 = new THREE.Color(0x8cc152), c3 = new THREE.Color(0x4f8f3a), dirt = new THREE.Color(0xa88a5c);
+  const c1 = new THREE.Color(0x6fae4a), c2 = new THREE.Color(0x9cc75a), c3 = new THREE.Color(0x4a8a36), dirt = new THREE.Color(0x9a7a50), mud = new THREE.Color(0x5e4a34), sand = new THREE.Color(0xc9b27a), burnt = new THREE.Color(0x3a3228);
+  // manchas quemadas / cráteres del campo de batalla
+  const scorch = Array.from({ length: 40 }, () => { const a = Math.random() * 6.28, r = 20 + Math.random() * 38; return [Math.cos(a) * r, Math.sin(a) * r, 1.5 + Math.random() * 3.5]; });
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i), r = Math.hypot(x, z);
-    const n = Math.sin(x * 0.11) * Math.cos(z * 0.13) + Math.sin(x * 0.031 + z * 0.047) * 0.8;
-    if (r > 75) pos.setY(i, (r - 75) * 0.06 * (1 + n * 0.5));
-    const c = c1.clone().lerp(n > 0 ? c2 : c3, Math.abs(n) * 0.5);
-    // tierra pisoteada alrededor del castillo
-    const sq = Math.max(Math.abs(x), Math.abs(z));
-    if (sq < HALF + 7) c.lerp(dirt, Math.max(0, 1 - (sq - HALF) / 7) * 0.55);
-    // camino al portón
-    if (z > HALF && Math.abs(x - GATE_POS.x - Math.sin(z * 0.08) * 3) < 3.2) c.lerp(dirt, 0.75);
+    const x = pos.getX(i), z = pos.getZ(i), y = groundY(x, z);
+    pos.setY(i, y);
+    const n = Math.sin(x * 0.11) * Math.cos(z * 0.13) + Math.sin(x * 0.031 + z * 0.047) * 0.8 + Math.sin(x * 0.7) * Math.cos(z * 0.6) * 0.3;
+    const c = c1.clone().lerp(n > 0 ? c2 : c3, Math.min(1, Math.abs(n) * 0.55));
+    const d = Math.pow(Math.pow(Math.abs(x), 4) + Math.pow(Math.abs(z), 4), 0.25);
+    // tierra pisoteada alrededor del castillo y barro del campo de batalla
+    if (d < HALF + 6) c.lerp(dirt, Math.max(0, 1 - (d - HALF) / 6) * 0.6);
+    const field = smooth(16, 26, d) * (1 - smooth(52, 66, Math.hypot(x, z)));
+    c.lerp(mud, field * (0.25 + 0.2 * Math.max(0, Math.sin(x * 0.4 + z * 0.3))));
+    for (const [sx, sz, sr] of scorch) { const k = 1 - Math.hypot(x - sx, z - sz) / sr; if (k > 0) c.lerp(burnt, k * 0.6); }
+    // camino al portón y orillas del río
+    if (z > HALF && Math.abs(x - ROAD_X(z)) < 3.2) c.lerp(dirt, 0.8);
+    const dz = Math.abs(z - RIVER_Z(x)); if (dz < 6) c.lerp(sand, (1 - dz / 6) * 0.7);
+    if (y > 4) c.lerp(new THREE.Color(0x8a8f7a), Math.min(0.6, (y - 4) * 0.05));
     col.push(c.r, c.g, c.b);
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
-  const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+  const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, map: grassTexture() }));
   ground.receiveShadow = true; scene.add(ground);
   // patio interior empedrado
   const yard = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, HALF * 2), new THREE.MeshStandardMaterial({ color: 0xb9a383, roughness: 1 }));
   yard.rotation.x = -Math.PI / 2; yard.position.y = 0.02; yard.receiveShadow = true; scene.add(yard);
-  return ground;
+  // río
+  const pts = [], uvs = [], idx = [];
+  const N = 260;
+  for (let i = 0; i <= N; i++) {
+    const x = -260 + i * 520 / N, z = RIVER_Z(x), y = waterY(x);
+    pts.push(x, y, z - 4.2, x, y, z + 4.2); uvs.push(i * 0.5, 0, i * 0.5, 1);
+    if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); wg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); wg.setIndex(idx); wg.computeVertexNormals();
+  const wc = document.createElement('canvas'); wc.width = wc.height = 128; const wgx = wc.getContext('2d');
+  wgx.fillStyle = '#3d86b8'; wgx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 60; i++) { wgx.strokeStyle = `rgba(220,240,255,${0.15 + Math.random() * 0.3})`; wgx.lineWidth = 1 + Math.random() * 2; const y0 = Math.random() * 128; wgx.beginPath(); wgx.moveTo(Math.random() * 128, y0); wgx.lineTo(Math.random() * 128, y0 + (Math.random() - 0.5) * 6); wgx.stroke(); }
+  const wtex = new THREE.CanvasTexture(wc); wtex.wrapS = wtex.wrapT = THREE.RepeatWrapping; wtex.colorSpace = THREE.SRGBColorSpace;
+  const water = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ map: wtex, transparent: true, opacity: 0.88, roughness: 0.25, metalness: 0.1 }));
+  water.receiveShadow = true; scene.add(water);
+  return { ground, water, wtex };
 }
 
 // Une muchos objetos estáticos en pocas mallas (muchas menos llamadas de dibujo = más FPS)
@@ -81,56 +137,97 @@ function mergeStatic(root, scene, castShadow) {
   }
 }
 
-function place(key, x, z, { s = 1, ry = 0, y = 0, scene, shadow = true } = {}) {
-  const o = A.clone(key); o.scale.setScalar(s); o.position.set(x, y, z); o.rotation.y = ry;
+function place(key, x, z, { s = 1, ry = 0, y = null, scene, shadow = true } = {}) {
+  const o = A.clone(key); o.scale.setScalar(s); o.position.set(x, y ?? groundY(x, z) - 0.05, z); o.rotation.y = ry;
   if (!shadow) o.traverse(m => { if (m.isMesh) m.castShadow = false; });
   scene.add(o); return o;
 }
 
 export function buildScenery(realScene) {
-  const clouds = [];
+  const clouds = [], fires = [];
   const far = new THREE.Group(), near = new THREE.Group();
   let scene = far;
   // montañas al fondo (norte y lados)
   const mts = ['mountain_A_grass_trees', 'mountain_B_grass_trees', 'mountain_C_grass_trees', 'mountain_A', 'mountain_B', 'mountain_C'];
-  for (let i = 0; i < 26; i++) {
-    const a = Math.PI * (1.08 + i / 25 * 0.84) + rnd(-0.03, 0.03), r = rnd(120, 170);
-    place('deco/' + mts[i % mts.length], Math.cos(a) * r, Math.sin(a) * r, { s: rnd(16, 26), ry: rnd(0, 6), scene, shadow: false });
+  for (let i = 0; i < 30; i++) {
+    const a = Math.PI * (1.02 + i / 29 * 0.96) + rnd(-0.03, 0.03), r = rnd(125, 175);
+    place('deco/' + mts[i % mts.length], Math.cos(a) * r, Math.sin(a) * r, { s: rnd(18, 30), ry: rnd(0, 6), scene, shadow: false });
   }
-  for (let i = 0; i < 14; i++) {
-    const a = Math.PI * (0.15 + i / 13 * 0.7) + rnd(-0.05, 0.05), r = rnd(125, 170);
-    place('deco/hills_' + 'ABC'[i % 3] + '_trees', Math.cos(a) * r, Math.sin(a) * r, { s: rnd(14, 20), ry: rnd(0, 6), scene, shadow: false });
+  for (let i = 0; i < 16; i++) {
+    const a = Math.PI * (0.05 + i / 15 * 0.9) + rnd(-0.05, 0.05), r = rnd(130, 175);
+    place('deco/hills_' + 'ABC'[i % 3] + '_trees', Math.cos(a) * r, Math.sin(a) * r, { s: rnd(14, 22), ry: rnd(0, 6), scene, shadow: false });
   }
-  // bosque en anillo, dejando claros por donde salen los enemigos y el camino
-  scene = near;
+  // bosque: lejos por el frente y los lados (campo de batalla abierto), más cerca por detrás
   const trees = A.MODELS.nature.filter(n => n.startsWith('Tree'));
-  for (let i = 0; i < 420; i++) {
-    const a = rnd(0, Math.PI * 2), r = 42 + Math.pow(Math.random(), 0.7) * 70;
+  for (let i = 0; i < 520; i++) {
+    const a = rnd(0, Math.PI * 2), dirZ = Math.sin(a);
+    const minR = dirZ > -0.35 ? 70 : 44;
+    const r = minR + Math.pow(Math.random(), 0.8) * (125 - minR);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    if (z > 20 && Math.abs(x - GATE_POS.x) < 9) continue; // camino
-    place('nature/' + trees[(Math.random() * trees.length) | 0], x, z, { s: rnd(1.6, 2.8), ry: rnd(0, 6), scene: r < 60 ? near : far });
+    if (Math.abs(z - RIVER_Z(x)) < 6) continue;
+    if (z > 20 && Math.abs(x - ROAD_X(z)) < 9) continue;
+    place('nature/' + trees[(Math.random() * trees.length) | 0], x, z, { s: rnd(1.8, 3.2), ry: rnd(0, 6), scene: r < 80 ? near : far });
   }
-  const small = ['Bush_1_A', 'Bush_2_A', 'Bush_3_A', 'Bush_4_A', 'Rock_1_A', 'Rock_2_A', 'Rock_3_A', 'Grass_1_A', 'Grass_2_A', 'Grass_1_A', 'Grass_2_A'];
+  // bosquecillos sueltos en el campo
+  for (let k = 0; k < 6; k++) {
+    const a = rnd(-0.2, 3.4), r = rnd(52, 64), cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+    if (Math.abs(cz - RIVER_Z(cx)) < 8 || (cz > 20 && Math.abs(cx - ROAD_X(cz)) < 12)) continue;
+    for (let i = 0; i < 5; i++) place('nature/' + trees[(Math.random() * trees.length) | 0], cx + rnd(-5, 5), cz + rnd(-5, 5), { s: rnd(1.8, 2.8), ry: rnd(0, 6), scene: near });
+  }
+  const small = ['Bush_1_A', 'Bush_2_A', 'Bush_3_A', 'Bush_4_A', 'Rock_1_A', 'Rock_2_A', 'Rock_3_A', 'Grass_1_A', 'Grass_2_A', 'Grass_1_A', 'Grass_2_A', 'Grass_1_A'];
   scene = far;
-  for (let i = 0; i < 260; i++) {
-    const a = rnd(0, Math.PI * 2), r = rnd(HALF + 6, 75);
+  for (let i = 0; i < 420; i++) {
+    const a = rnd(0, Math.PI * 2), r = rnd(HALF + 8, 95);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    if (z > HALF && Math.abs(x - GATE_POS.x) < 4) continue;
-    place('nature/' + small[(Math.random() * small.length) | 0], x, z, { s: rnd(1.2, 2.2), ry: rnd(0, 6), scene, shadow: false });
+    if (z > HALF && Math.abs(x - ROAD_X(z)) < 4) continue;
+    if (Math.abs(z - RIVER_Z(x)) < 3.5) continue;
+    place('nature/' + small[(Math.random() * small.length) | 0], x, z, { s: rnd(1.2, 2.4), ry: rnd(0, 6), scene, shadow: false });
   }
-  // aldea al sur, junto al camino (de ahí vienen los aldeanos)
-  const village = [['castle/home_A', -6, 48], ['castle/home_B', 16, 46], ['castle/windmill', -14, 56], ['castle/home_A', 18, 58], ['castle/grain', -4, 58], ['castle/home_B', -12, 44], ['castle/church', 26, 52]];
+  // rocas grandes en las laderas
+  for (let i = 0; i < 26; i++) {
+    const a = rnd(0, Math.PI * 2), r = rnd(22, 34), x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (z > HALF && Math.abs(x - ROAD_X(z)) < 5) continue;
+    place('deco/rock_single_' + 'ACE'[i % 3], x, z, { s: rnd(3.5, 6.5), ry: rnd(0, 6), scene: near });
+  }
+  // aldea al otro lado del río (de ahí vienen los aldeanos)
+  const village = [['castle/home_A', -6, 54], ['castle/home_B', 17, 52], ['castle/windmill', -15, 62], ['castle/home_A', 19, 63], ['castle/grain', -4, 64], ['castle/home_B', -13, 51], ['castle/church', 28, 58], ['castle/home_A', 30, 49], ['castle/blacksmith', -22, 55]];
   for (const [k, x, z] of village) place(k, x, z, { s: 4, ry: Math.atan2(GATE_POS.x - x, HALF - z), scene: near });
+  // campamentos enemigos en el borde del bosque: tiendas, estandartes y fogatas
+  for (let k = 0; k < 9; k++) {
+    const a = -0.25 + k / 8 * 3.6 + rnd(-0.1, 0.1), r = rnd(64, 70), cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+    if (Math.abs(cz - RIVER_Z(cx)) < 9 || (cz > 20 && Math.abs(cx - ROAD_X(cz)) < 10)) continue;
+    for (let i = 0; i < 3; i++) place('deco/tent', cx + rnd(-5, 5), cz + rnd(-4, 4), { s: rnd(6, 8), ry: rnd(0, 6), scene: near });
+    place('res/Wood_Log_Stack', cx, cz, { s: 1.3, ry: rnd(0, 6), scene: near });
+    fires.push(new THREE.Vector3(cx, groundY(cx, cz) + 0.6, cz));
+  }
+  // puente sobre el río en el camino
+  const bz = RIVER_Z(ROAD_X(43)), bx = ROAD_X(bz);
+  place('castle/bridge_A', bx, bz, { s: 4.2, ry: Math.PI / 2, y: waterY(bx) + 0.15, scene: near });
   mergeStatic(near, realScene, true); mergeStatic(far, realScene, false);
+  // estacas (barricadas) en el campo de batalla: una sola malla instanciada
+  const stakeGeo = mergeGeometries([new THREE.CylinderGeometry(0.2, 0.22, 2.2, 5).translate(0, 1.1, 0), new THREE.ConeGeometry(0.2, 0.7, 5).translate(0, 2.55, 0)]);
+  const stakes = [];
+  for (let row = 0; row < 2; row++) for (let i = 0; i < 180; i++) {
+    const a = i / 180 * Math.PI * 2 + row * 0.012, base = 23 + row * 1.2;
+    if (Math.floor(i / 6) % 3 === 0) continue; // huecos entre barricadas
+    const x = Math.cos(a) * base * 1.05, z = Math.sin(a) * base * 1.05;
+    if (z > 10 && Math.abs(x - ROAD_X(z)) < 4.5) continue;
+    stakes.push([x, z, a]);
+  }
+  const stakeMesh = new THREE.InstancedMesh(stakeGeo, new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 1 }), stakes.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  stakes.forEach(([x, z, a], i) => { e.set(0.5, Math.atan2(Math.cos(a), Math.sin(a)) + (Math.random() - 0.5) * 0.3, 0, 'YXZ'); q.setFromEuler(e); m4.compose(new THREE.Vector3(x, groundY(x, z) - 0.2, z), q, new THREE.Vector3(1, 1 + Math.random() * 0.3, 1)); stakeMesh.setMatrixAt(i, m4); });
+  stakeMesh.castShadow = true; stakeMesh.receiveShadow = true; realScene.add(stakeMesh);
   scene = realScene;
-  for (let i = 0; i < 10; i++) {
-    const c = place('deco/cloud_' + (i % 3 ? 'big' : 'small'), rnd(-140, 140), rnd(-120, 60), { s: rnd(10, 18), y: rnd(38, 55), scene, shadow: false });
+  for (let i = 0; i < 12; i++) {
+    const c = place('deco/cloud_' + (i % 3 ? 'big' : 'small'), rnd(-150, 150), rnd(-130, 60), { s: rnd(10, 20), y: rnd(40, 58), scene, shadow: false });
     clouds.push(c);
   }
-  return { clouds };
+  return { clouds, fires };
 }
 
 // ---------- Ballesta de asedio (procedural) ----------
+const BALLISTA_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.1 });
 export function makeBallista() {
   const wood = new THREE.MeshStandardMaterial({ color: 0x7a4b26, roughness: 0.9 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x4a2c16, roughness: 0.9 });
@@ -149,6 +246,14 @@ export function makeBallista() {
   const strGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1.27, 0.06, 1.05), new THREE.Vector3(0, 0.12, -0.5), new THREE.Vector3(1.27, 0.06, 1.05)]);
   const string = new THREE.Line(strGeo, new THREE.LineBasicMaterial({ color: 0xeeeeee })); pitch.add(string);
   const bolt = makeBoltMesh(); bolt.position.set(0, 0.2, 0.5); pitch.add(bolt);
+  // juntamos las piezas de madera/hierro del cuerpo en una sola malla (menos llamadas de dibujo)
+  const parts = pitch.children.filter(o => o.isMesh);
+  if (parts.length > 1) {
+    pitch.updateMatrix();
+    const geos = parts.map(o => { o.updateMatrix(); const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix); const n = g.attributes.position.count, c = o.material.color, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k); return g; });
+    for (const o of parts) o.removeFromParent();
+    pitch.add(new THREE.Mesh(mergeGeometries(geos), BALLISTA_MAT));
+  }
   root.traverse(o => { if (o.isMesh) o.castShadow = true; });
   root.userData = { yaw, pitch, bolt, string };
   return root;

@@ -6,6 +6,7 @@ import * as S from './audio.js';
 import { FX } from './fx.js';
 import { buildSky, buildLights, buildGround, buildScenery, buildCastle, HALF } from './world.js';
 import { Game, esc, WAVES } from './game.js';
+import { Atmosphere } from './atmo.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -14,9 +15,14 @@ const ls = { get(k) { try { return localStorage.getItem(k); } catch { return nul
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true, powerPreference: 'high-performance' });
-let pixelRatio = params.has('lite') ? 0.5 : Math.min(window.devicePixelRatio, 1.5);
+// gráficos integrados (típicos de PCs de oficina): empezamos con una calidad más moderada
+const gpuName = (() => { try { const gl = document.createElement('canvas').getContext('webgl'); const ext = gl.getExtension('WEBGL_debug_renderer_info'); return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''; } catch { return ''; } })();
+const weakGPU = /Intel|UHD|HD Graphics|Iris|Mali|Adreno|PowerVR|SwiftShader/i.test(gpuName) && !params.has('hq');
+window.__weakGPU = weakGPU;
+let pixelRatio = params.has('lite') ? 0.5 : weakGPU ? 1 : Math.min(window.devicePixelRatio, 1.5);
 renderer.setPixelRatio(pixelRatio);
-renderer.shadowMap.enabled = !params.has('lite'); renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !params.has('lite');
+console.log('[quality] GPU:', gpuName, weakGPU ? '(modo PC de oficina)' : ''); renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const labels = new CSS2DRenderer({ element: $('labels') });
@@ -25,7 +31,9 @@ const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 600);
 function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); labels.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-let game, fx, sceneryRefs;
+let game, fx, sceneryRefs, atmo, lights, groundRefs;
+window.__lite = params.has('lite');
+
 const state = { code: null, key: ss.get('cq_host_key'), level: ls.get('cq_level') || 'A2', tq: +(ls.get('cq_tq') || 20), dur: +(ls.get('cq_dur') || 10), gold: ls.get('cq_gold') !== '0', diff: ls.get('cq_diff') || 'normal', paused: false, players: new Map() };
 
 // ---------- HUD ----------
@@ -51,19 +59,21 @@ const hud = {
 
 // ---------- Carga ----------
 async function boot() {
-  buildSky(scene); buildLights(scene); buildGround(scene);
+  buildSky(scene); lights = buildLights(scene); groundRefs = buildGround(scene);
   await A.loadAll(p => { $('loadbar').firstElementChild.style.width = (p * 100).toFixed(0) + '%'; });
   sceneryRefs = buildScenery(scene);
   const castle = buildCastle(scene);
   fx = new FX(scene);
   game = new Game({ scene, camera, castle, fx, hud });
+  atmo = new Atmosphere({ scene, lights, renderer, scenery: sceneryRefs, castle, fx });
+  window.__atmo = atmo; window.__renderer = renderer;
   window.WAVE_TITLES = WAVES.map(w => w.title);
   game.onWin = () => endBattle(true);
   game.onLose = () => endBattle(false);
   $('loadtxt').textContent = 'Ready!';
   $('clickStart').classList.remove('hidden');
   window.__game = game; // depuración
-  window.__sim = async (sec, dt = 1 / 30) => { for (let i = 0; i < sec / dt; i++) { game.update(dt); fx.update(dt); if (i % 10 === 0) await new Promise(r => setTimeout(r, 0)); } };
+  window.__sim = async (sec, dt = 1 / 30) => { for (let i = 0; i < sec / dt; i++) { stepWorld(dt); if (i % 10 === 0) await new Promise(r => setTimeout(r, 0)); } };
   window.done = true;
   if (params.has('auto')) enter();
   if (params.has('noui')) document.querySelectorAll('.ui').forEach(e => e.style.display = 'none');
@@ -205,7 +215,7 @@ function updateCamera(dt) {
   } else if (game.focus && game.focus.t > 0) {
     game.focus.t -= dt;
     const p = game.focus.target.position;
-    want.copy(p).add(new THREE.Vector3(0, 10, 22)).lerp(GAME_CAM, 0.35); look.copy(p).setY(p.y + 3);
+    want.copy(p).add(new THREE.Vector3(-7, 10, 18)).lerp(GAME_CAM, game.focus.zoom ?? 0.35); look.copy(p).setY(p.y + 2);
   } else {
     const t = clock.elapsedTime;
     want.copy(GAME_CAM).add(new THREE.Vector3(Math.sin(t * 0.07) * 3, 0, Math.cos(t * 0.05) * 2)); look.copy(GAME_LOOK);
@@ -224,17 +234,41 @@ function adaptQuality(fps) {
     slowSecs = 0;
     if (pixelRatio > 0.8) { pixelRatio = Math.max(0.75, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); resize(); console.log('[quality] pixelRatio', pixelRatio); }
     else if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); console.log('[quality] shadows off'); }
+    else if (game && (game.horde.quality ?? 1) > 0.4) { game.horde.quality = (game.horde.quality ?? 1) - 0.2; console.log('[quality] horde', game.horde.quality); }
   }
+}
+// avanza todo el mundo un paso (juego, partículas, ambiente, efectos de tensión)
+let heartT = 0, drumT = 0;
+function stepWorld(dt) {
+  // cámara lenta cuando cae el jefe
+  let gdt = dt;
+  if (game.slowmo > 0) { game.slowmo -= dt; gdt = dt * 0.28; }
+  game.update(gdt); fx.update(gdt);
+  for (const c of sceneryRefs.clouds) { c.position.x += dt * 1.2; if (c.position.x > 160) c.position.x = -160; }
+  if (groundRefs) { groundRefs.wtex.offset.x -= dt * 0.08; }
+  // del atardecer a la noche, con tormenta al final
+  if (game.phase === 'lobby') { atmo.target = 0.12; atmo.stormTarget = 0; }
+  else if (game.phase === 'playing') {
+    const p = game.wave >= 6 ? 1 : (game.wave + Math.min(1, game.waveT / game.waveLen)) / 6 * 0.92;
+    atmo.target = Math.max(atmo.target, p); atmo.stormTarget = game.wave >= 6 ? 1 : game.wave >= 4 ? 0.6 : 0;
+  }
+  atmo.update(dt, game); game.night = atmo.night;
+  // tensión: viñeta roja y latido cuando el castillo está por caer
+  const k = game.hp / game.maxHp, vig = $('vig');
+  if (game.phase === 'playing' && k < 0.35) {
+    vig.style.opacity = ((0.35 - k) / 0.35 * 0.75 + 0.15) * (0.8 + 0.2 * Math.sin(performance.now() / 160));
+    if (k < 0.25 && (heartT -= dt) <= 0) { heartT = 0.95; S.sfx('heart'); }
+  } else vig.style.opacity = 0;
+  // tambores de guerra de la horda
+  if (game.phase === 'playing' && (drumT -= dt) <= 0) { drumT = game.wave >= 6 ? 0.9 : 1.8; S.sfx('drum', 0.35 + 0.1 * Math.min(6, game.wave) / 6); }
 }
 function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, clock.getDelta());
   fpsN++; fpsT += dt; if (fpsT > 1) { window.__fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; adaptQuality(window.__fps); }
-  if (game && !state.paused) {
-    game.update(dt); fx.update(dt);
-    for (const c of sceneryRefs.clouds) { c.position.x += dt * 1.2; if (c.position.x > 160) c.position.x = -160; }
-  }
+  if (game && !state.paused) stepWorld(dt);
   updateCamera(dt);
+  if (fx) fx.setScale(camera, renderer.domElement.height);
   renderer.render(scene, camera); labels.render(scene, camera);
 }
 boot().then(loop);

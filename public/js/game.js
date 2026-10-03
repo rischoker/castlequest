@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import * as A from './assets.js';
 import * as S from './audio.js';
 import { Unit, makePrincess, makeBraid, swayBraid } from './units.js';
-import { HALF, WALL_H, WALK_Y, GATE_POS, setSegmentLook, makeBoltMesh } from './world.js';
+import { HALF, WALL_H, WALK_Y, GATE_POS, setSegmentLook, makeBoltMesh, groundY } from './world.js';
+import { Horde, Archers, GLOW_TEX } from './crowd.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -17,7 +18,8 @@ export const ENEMIES = {
   goblin:   { name: 'Armed Goblins', models: ['enemies/imp'], h: 1.6, hp: 22, speed: 3.3, dps: 5, cost: 26 },
   orc:      { name: 'Orcs with Ladders', models: ['enemies/orc'], h: 2.4, hp: 55, speed: 1.6, dps: 7, ladder: true, cost: 60 },
   ogre:     { name: 'Rock-throwing Ogres', models: ['enemies/ogre'], h: 3.8, hp: 120, speed: 1.0, ranged: 'rock', range: 15, dmg: 9, cd: 4.2, tint: 0x7d8f5a, cost: 130 },
-  monkey:   { name: 'Flying Monkeys', models: ['enemies/ogre'], h: 1.3, hp: 16, speed: 4.2, flying: true, dps: 2.2, wings: true, tint: 0x8a5a2b, cost: 34 },
+  monkey:   { name: 'Flying Monkeys', models: ['enemies/monkey'], h: 1.5, hp: 16, speed: 4.2, flying: true, dps: 2.2, wings: 'bat', cost: 34 },
+  ram:      { name: 'Battering Rams', models: ['enemies/orc'], h: 2.4, hp: 150, speed: 1.25, ram: true, dps: 0, tint: 0x5a6a3a, tintAmt: 0.25, cost: 140 },
   witch:    { name: 'Flying Witches', models: ['chars/Mage'], h: 1.9, hp: 34, speed: 3.2, flying: true, dps: 3.5, broom: true, tint: 0x3d7a3a, tintAmt: 0.55, cost: 45 },
   darkmage: { name: 'Dark Mages', models: ['chars/Skeleton_Mage'], h: 2.1, hp: 40, speed: 1.5, ranged: 'magic', range: 13, dmg: 6, cd: 3, tint: 0x5a2a8a, cost: 55 },
   troll:    { name: 'Stone Trolls', models: ['enemies/goblin'], h: 3.4, hp: 170, speed: 0.9, dps: 14, tint: 0x8a8f9a, tintAmt: 0.3, cost: 170 },
@@ -27,9 +29,9 @@ export const WAVES = [
   { title: 'The Dead Awaken', mix: { zombie: 1 } },
   { title: 'Bones in the Grass', mix: { zombie: 0.5, skeleton: 1 } },
   { title: 'Goblin Raid', mix: { skeleton: 0.5, zombie: 0.3, goblin: 1 } },
-  { title: 'Orcs at the Walls', mix: { goblin: 0.6, skeleton: 0.4, orc: 1 } },
-  { title: 'Ogres and Flying Monkeys', mix: { orc: 0.6, goblin: 0.4, ogre: 0.35, monkey: 0.9 } },
-  { title: 'The Dark Army', mix: { troll: 0.25, witch: 0.6, darkmage: 0.45, mimic: 0.35, orc: 0.5, ogre: 0.2, monkey: 0.4 } },
+  { title: 'Orcs at the Walls', mix: { goblin: 0.6, skeleton: 0.4, orc: 1, ram: 0.12 } },
+  { title: 'Ogres and Flying Monkeys', mix: { orc: 0.6, goblin: 0.4, ogre: 0.35, monkey: 0.9, ram: 0.12 } },
+  { title: 'The Dark Army', mix: { troll: 0.25, witch: 0.6, darkmage: 0.45, mimic: 0.35, orc: 0.5, ogre: 0.2, monkey: 0.4, ram: 0.12 } },
 ];
 export const BOSSES = {
   A1: { name: 'Grumbo the Ogre King', model: 'enemies/ogre', h: 8, tint: 0x6b4a2a, attack: 'rocks', line: 'Grumbo hungry! Grumbo smash castle!' },
@@ -48,8 +50,10 @@ export class Game {
     this.players = new Map();
     this.villagers = new Map();
     this.enemies = []; this.projectiles = []; this.ladders = [];
-    this.phase = 'lobby'; this.time = 0; this.shake = 0;
-    
+    this.phase = 'lobby'; this.time = 0; this.shake = 0; this.timeScale = 1;
+    // la horda del fondo y los arqueros (instanciados: baratos de dibujar)
+    this.horde = new Horde(scene, { max: window.__lite ? 180 : window.__weakGPU ? 240 : 320 });
+    this.archers = new Archers(scene, castle);
     this.reset();
     // princesa en el balcón
     this.princess = makePrincess();
@@ -65,8 +69,10 @@ export class Game {
     this.hp = 1000; this.maxHp = 1000; this.ammo = 25; this.wave = -1; this.waveT = 0; this.spawnAcc = 0; this.boss = null; this.bossDead = false;
     this.up = { rate: 0, dmg: 0, pierce: 0, fire: 0, range: 0, armor: 0, mason: 0, carts: 0, multi: 0, catapult: 0, frost: 0 };
     this.stats = { correct: 0, wrong: 0, golden: 0, kills: 0 };
-    this.catT = 0; this.halfWarned = false;
+    this.catT = 0; this.halfWarned = false; this.lastStand = false; this.punchCd = 0; this.focus = null;
     if (this.mood) this.mood.attempts = [];
+    if (this.horde) this.horde.reset();
+    if (this.archers) this.archers.arrows = [];
     for (const e of this.enemies) e.unit.dispose(); this.enemies = [];
     for (const p of this.projectiles) p.mesh.removeFromParent(); this.projectiles = [];
     for (const l of this.ladders) l.obj.removeFromParent(); this.ladders = [];
@@ -130,6 +136,7 @@ export class Game {
     this.cfg = cfg; this.reset();
     this.phase = 'playing'; this.time = 0;
     this.waveLen = Math.max(30, (cfg.duration * 60 * 0.85) / WAVES.length);
+    this.horde.wave = 0; this.horde.start();
     for (const pl of this.players.values()) { pl.correct = 0; pl.points = 0; pl.streak = 0; this.assignStation(pl, true); }
     this.nextWave();
     S.restartMusic('war');
@@ -144,17 +151,19 @@ export class Game {
     const newest = Object.keys(w.mix).filter(k => !WAVES.slice(0, this.wave).some(pw => pw.mix[k]));
     this.hud.banner(`Wave ${this.wave + 1} / ${WAVES.length}`, w.title + (newest.length ? ' — ' + newest.map(k => ENEMIES[k].name).join(', ') : ''));
     S.sfx('horn'); S.say(`Wave ${this.wave + 1}. ${w.title}!`, { who: 'narrator' });
+    this.horde.wave = this.wave; setTimeout(() => { this.horde.roar(); S.sfx('warcry'); }, 1200);
   }
   startBoss() {
     const B = BOSSES[this.cfg.level] || BOSSES.A1;
     this.wave = WAVES.length; this.waveT = 0;
     const n = Math.max(1, this.activePlayers());
-    const hp = Math.round(Math.max(400, this.expectedDps(true) * 80));
+    const hp = Math.round(Math.max(400, this.expectedDps(true) * (66 + Math.min(14, this.activePlayers()))));
     this.boss = this.spawnBoss(B, hp);
     if (B.escort) this.escortPending = { def: BOSSES[B.escort], hp: Math.round(hp * 0.5) };
     this.hud.banner('BOSS', B.name, 'boss'); S.sfx('roar'); S.restartMusic('boss');
     setTimeout(() => S.say(B.line, { who: 'boss' }), 900);
-    this.focus = { t: 3.2, target: this.boss.unit.root };
+    this.focus = { t: 3.6, target: this.boss.unit.root, zoom: 1 };
+    this.horde.wave = 6; this.horde.roar(); S.sfx('warcry');
     this.say('Oh no! Be brave, heroes!', 'sad');
   }
   maxAmmo() { return 30 + 3 * Math.max(1, this.activePlayers()) + 15 * this.up.carts; }
@@ -169,6 +178,7 @@ export class Game {
     if (base) return rate * 0.65 * 3 * 10 + 1.5;
     return rate * 0.65 * 3 * 10 * (1 + (eff - 1) * 0.6) + 10 * u.catapult + 1.5;
   }
+  onVolley() { S.sfx('volley'); }
   activePlayers() { let n = 0; for (const p of this.players.values()) if (p.online) n++; return n; }
 
   finish(win) {
@@ -180,7 +190,10 @@ export class Game {
       for (const pl of this.players.values()) pl.unit.play('cheer');
       for (let i = 0; i < 12; i++) setTimeout(() => this.fx.emit('star', V(rnd(-10, 10), 6, rnd(-10, 10)), 12), i * 200);
       for (const e of this.enemies) this.killEnemy(e, true);
+      // la horda se desmorona
+      this.horde.members.forEach((m, i) => setTimeout(() => this.horde.kill(m), Math.random() * 2500));
     } else {
+      this.horde.roar(); S.sfx('warcry');
       S.sfx('defeat'); S.sfx('boom'); this.princess.play('sad'); this.say('The castle has fallen...', 'sad', true);
       for (const s of this.castle.segments) { s.hp = 0; setSegmentLook(s); this.fx.emit('dark', s.center.clone().setY(3), 10, { area: 6 }); }
       for (const pl of this.players.values()) pl.unit.play('death', { once: true });
@@ -194,8 +207,8 @@ export class Game {
   onQuestion({ pid, qid, time, golden }) {
     const pl = this.players.get(pid);
     if (!pl || this.phase !== 'playing') return;
-    const unit = new Unit('chars/peasant', { height: 1.9, tint: golden ? 0xffd34e : null, tintAmt: 0.35, emissive: golden ? 0x6a4a00 : null });
-    const sz = 37 + rnd(-1.5, 1.5); const start = V(GATE_POS.x + Math.sin(sz * 0.08) * 3 + rnd(-1.2, 1.2), 0, sz);
+    const unit = new Unit('chars/peasant', { height: 1.9, tint: golden ? 0xffd34e : null, tintAmt: 0.35, emissive: golden ? 0x6a4a00 : null, shadow: false });
+    const sz = 37 + rnd(-1.5, 1.5); const start = V(GATE_POS.x + Math.sin(sz * 0.08) * 3 + rnd(-1.2, 1.2), 0, sz); start.y = groundY(start.x, start.z);
     unit.root.position.copy(start);
     // carretilla con suministros
     const cart = A.clone('deco/wheelbarrow'); cart.scale.setScalar(6.5); cart.position.set(0, 0, 1.2); cart.rotation.y = Math.PI; unit.root.add(cart);
@@ -209,7 +222,7 @@ export class Game {
   }
   roadPath(start) {
     const pts = [start.clone()];
-    for (let z = start.z - 5; z > HALF + 3; z -= 5) pts.push(V(GATE_POS.x + Math.sin(z * 0.08) * 3, 0, z));
+    for (let z = start.z - 5; z > HALF + 3; z -= 5) { const x = GATE_POS.x + Math.sin(z * 0.08) * 3; pts.push(V(x, groundY(x, z), z)); }
     pts.push(V(GATE_POS.x, 0, HALF + 1.8)); pts.push(V(GATE_POS.x, 0, HALF - 2.5)); pts.push(V(GATE_POS.x - 1, 0, HALF - 7));
     return new THREE.CatmullRomCurve3(pts);
   }
@@ -296,11 +309,15 @@ export class Game {
       if (ch === 'worse') {
         S.sfx(seg.state === 3 ? 'boom' : 'crack'); this.shake = Math.max(this.shake, seg.state === 3 ? 0.9 : 0.35);
         this.fx.emit('dust', seg.center.clone().setY(1), 16, { area: 6 });
-        if (seg.state === 3) { this.say('The wall is broken! Help!', 'sad', true); this.hud.feed('💥 A wall has been <b>breached</b>!', 'bad'); }
+        if (seg.state === 3) { this.say('The wall is broken! Help!', 'sad', true); this.hud.feed('💥 A wall has been <b>breached</b>!', 'bad'); this.punch(seg.center.clone().setY(2)); this.horde.roar(); S.sfx('warcry'); }
       }
     } else if (isPenalty) {
       const s = pick(this.castle.segments.filter(x => x.hp > 0) || this.castle.segments);
       if (s) { s.hp = Math.max(1, s.hp - 4); setSegmentLook(s); this.fx.emit('dust', s.center.clone().setY(4), 5); }
+    }
+    if (!this.lastStand && this.hp < this.maxHp * 0.25) {
+      this.lastStand = true; this.hud.banner('LAST STAND!', 'Every answer counts — the castle is about to fall!', 'boss');
+      S.sfx('horn'); this.say('Heroes, this is our last stand! Answer, quickly!', 'sad', true); S.restartMusic('boss');
     }
     if (!this.halfWarned && this.hp < this.maxHp * 0.5) { this.halfWarned = true; this.say('The castle is half destroyed! Hurry!', 'sad', true); }
     if (this.hp <= 0) this.onLose && this.onLose();
@@ -309,10 +326,15 @@ export class Game {
   // ---------- Enemigos ----------
   spawnEnemy(type, at) {
     const D = ENEMIES[type];
-    const unit = new Unit(pick(D.models), { height: D.h * 1.25, tint: D.tint, tintAmt: D.tintAmt ?? 0.45 });
-    const a = rnd(0, Math.PI * 2);
+    const unit = new Unit(pick(D.models), { height: D.h * 1.25, tint: D.tint, tintAmt: D.tintAmt ?? 0.45, shadow: false });
+    // la mayoría llega por los lados que ve la cámara (frente, izquierda y derecha)
+    const a = Math.random() < 0.8 ? rnd(-0.35, 3.5) : rnd(3.5, 5.93);
     let r = D.rise ? rnd(24, 32) : rnd(46, 52);
-    const pos = at ? at.clone() : V(Math.cos(a) * r, D.flying ? rnd(8, 11) : 0, Math.sin(a) * r);
+    let pos = at ? at.clone() : null;
+    if (!pos && !D.flying && !D.rise && !D.ram) pos = this.horde.take(a); // sale de la horda
+    if (!pos) pos = V(Math.cos(a) * r, 0, Math.sin(a) * r);
+    if (D.ram) { const gz = 46; pos = V(GATE_POS.x + rnd(-14, 14), 0, gz); }
+    pos.y = D.flying ? rnd(8, 11) : groundY(pos.x, pos.z);
     unit.root.position.copy(pos);
     this.decorate(unit, D);
     this.scene.add(unit.root);
@@ -325,9 +347,20 @@ export class Game {
   }
   decorate(unit, D) {
     if (D.wings) {
-      const wm = new THREE.MeshStandardMaterial({ color: 0x5a3a20, side: THREE.DoubleSide });
+      // alas de murciélago: separamos el modelo en ala izquierda y derecha para que aleteen
       unit.wings = [];
-      for (const s of [-1, 1]) { const w = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.6), wm); w.position.set(s * 0.6, D.h * 0.7, -0.2); w.geometry.translate(s * 0.55, 0, 0); unit.root.add(w); unit.wings.push({ w, s }); }
+      for (const s of [-1, 1]) { const w = batWing(s); w.scale.setScalar(D.h * 0.24); w.position.set(0, D.h * 1.25 * 0.62, -0.25); w.rotation.x = -0.25; unit.root.add(w); unit.wings.push({ w, s }); }
+    }
+    if (D.ram) {
+      // ariete: un tronco con punta de hierro cargado por tres orcos
+      const log = new THREE.Group();
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 7, 8), new THREE.MeshStandardMaterial({ color: 0x8a5a2e, roughness: 1 })); trunk.rotation.x = Math.PI / 2; log.add(trunk);
+      const capM = new THREE.MeshStandardMaterial({ color: 0x55585e, metalness: 0.7, roughness: 0.4 });
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 8), capM); cap.rotation.x = Math.PI / 2; cap.position.z = 3.8; log.add(cap);
+      for (const z of [-2, 0, 2]) { const band = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.06, 4, 10), capM); band.position.z = z; log.add(band); }
+      log.position.set(0, 1.5, -0.4); log.traverse(o => { if (o.isMesh) o.castShadow = true; }); unit.root.add(log); unit.log = log;
+      unit.crew = [];
+      for (const [x, z] of [[1.3, -1.4], [-1.3, -2.6]]) { const c = new Unit('enemies/orc', { height: D.h * 1.25, tint: D.tint, tintAmt: 0.25, shadow: false }); c.root.position.set(x, 0, z); c.play('walk'); unit.root.add(c.root); unit.crew.push(c); }
     }
     if (D.broom) {
       const broom = new THREE.Group();
@@ -339,7 +372,10 @@ export class Game {
   }
   spawnBoss(B, hp) {
     const unit = new Unit(B.model, { height: B.h, tint: B.tint, tintAmt: B.tintAmt ?? 0.4, emissive: B.emissive });
-    const pos = B.flying ? V(0, 16, -60) : V(rnd(-4, 4), 0, -50);
+    // los jefes llegan por el frente o por los lados, para que se vea el daño que hacen
+    const side = Math.random();
+    let pos = side < 0.5 ? V(rnd(-18, 12), 0, 55) : side < 0.85 ? V(-55, 0, rnd(-6, 14)) : V(55, 0, rnd(0, 16));
+    if (B.flying) pos = V(-50, 18, 50); else pos.y = groundY(pos.x, pos.z);
     unit.root.position.copy(pos); this.scene.add(unit.root);
     unit.play('walk', { speed: 0.6 });
     if (B.attack === 'lich') {
@@ -361,24 +397,30 @@ export class Game {
     for (const s of this.castle.segments) { const d = s.outer.distanceToSquared(pos) * (s.hp <= 0 ? 0.7 : 1); if (d < bd) { bd = d; best = s; } }
     return best;
   }
-  hurt(e, dmg, { fire, frost, from } = {}) {
+  hurt(e, dmg, { fire, frost, quiet } = {}) {
     if (e.dead) return;
     e.hp -= dmg;
     if (fire) e.burn = 3; if (frost) e.slow = 2.5;
-    if (!e.isBoss && e.state !== 'climb' && Math.random() < 0.3 && e.unit.action('hit')) { e.unit.play('hit', { once: true, force: true }); e.hitT = 0.4; }
-    this.fx.emit(fire ? 'fire' : 'spark', e.unit.root.position.clone().add(V(0, e.D.h * 0.6, 0)), 4);
-    S.sfx('hit', 0.6);
+    if (!quiet && !e.isBoss && !e.D.ram && e.state !== 'climb' && Math.random() < 0.3 && e.unit.action('hit')) { e.unit.play('hit', { once: true, force: true }); e.hitT = 0.4; }
+    const hp = e.unit.root.position.clone().add(V(0, e.D.h * 0.6, 0));
+    if (fire) { this.fx.emit('fire', hp, 10, { scale: 1.3 }); this.fx.emit('smoke', hp, 2); }
+    else if (frost) { this.fx.emit('ice', hp, 12, { scale: 1.3, spread: 3 }); }
+    else this.fx.emit('spark', hp, quiet ? 2 : 4);
+    if (!quiet) S.sfx('hit', 0.6);
     if (e.hp <= 0) this.killEnemy(e);
   }
   killEnemy(e, silent) {
     if (e.dead) return; e.dead = true; e.state = 'dead'; e.t = 0;
     e.unit.play('death', { once: true });
+    if (e.unit.crew) for (const c of e.unit.crew) c.play('death', { once: true });
     if (e.unit.bar) e.unit.bar.visible = false;
     if (e.ladder) { e.ladder.falling = true; }
     if (!silent) { this.stats.kills++; S.sfx('death', 0.5); this.fx.emit('smoke', e.unit.root.position.clone().setY(0.5), e.isBoss ? 30 : 4); }
     if (e.isBoss && !silent) {
       this.bossDead = this.enemies.every(x => !x.isBoss || x.dead);
       S.sfx('roar'); this.shake = 1.2;
+      // cámara lenta al caer el jefe
+      if (this.bossDead) { this.slowmo = 2.2; this.focus = { t: 3, target: e.unit.root, zoom: 0.8 }; }
       if (this.bossDead) setTimeout(() => this.onWin && this.onWin(), 2600);
     }
   }
@@ -394,10 +436,15 @@ export class Game {
       if (i) tp.add(V(rnd(-1.5, 1.5), 0, rnd(-1.5, 1.5)));
       const dir = tp.sub(from).normalize();
       const mesh = makeBoltMesh(); mesh.position.copy(from); mesh.lookAt(from.clone().add(dir));
-      if (this.up.fire) mesh.children[1].material = new THREE.MeshBasicMaterial({ color: 0xff7a1a });
-      if (this.up.frost) mesh.children[2].material = new THREE.MeshBasicMaterial({ color: 0x8fe0ff });
+      // virote elemental: si hay fuego y hielo, se alternan
+      const elem = weak ? null : this.up.fire && this.up.frost ? (Math.random() < 0.5 ? 'fire' : 'frost') : this.up.fire ? 'fire' : this.up.frost ? 'frost' : null;
+      if (elem) {
+        mesh.children[1].material = elemMat(elem);
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: elem === 'fire' ? 0xff8a2a : 0x7fdcff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        glow.scale.setScalar(2.4); glow.position.z = 0.9; mesh.add(glow);
+      }
       this.scene.add(mesh);
-      this.projectiles.push({ kind: 'bolt', mesh, vel: dir.multiplyScalar(48), life: 1.6, dmg: 10 * (1 + 0.2 * this.up.dmg), pierce: this.up.pierce, hit: new Set() });
+      this.projectiles.push({ kind: 'bolt', elem, mesh, vel: dir.multiplyScalar(48), life: 1.6, dmg: 10 * (1 + 0.2 * this.up.dmg), pierce: this.up.pierce, hit: new Set() });
     }
     b.recoil = 1; S.sfx('bolt', 0.7);
     for (const pl of this.players.values()) if (pl.station && pl.station.seg === seg && !pl.busy) { pl.unit.play('shoot', { once: true, force: true }); pl.busy = 0.7; }
@@ -450,6 +497,9 @@ export class Game {
     this.updateEnemies(dt);
     this.updateBallistas(dt);
     this.updateSegments(dt);
+    this.horde.update(dt);
+    this.archers.update(dt, this);
+    if (this.punchCd > 0) this.punchCd -= dt;
     if (this.phase === 'playing') this.updateWaves(dt);
     this.hud.update(this);
   }
@@ -509,15 +559,15 @@ export class Game {
     const bossPhase = this.wave >= WAVES.length;
     // La presión se calcula con el ritmo REAL de respuestas del grupo (no con sus aciertos):
     // un grupo que acierta más del 70% gana con holgura; uno que acierta menos, sufre.
-    const budget = this.expectedDps() * (0.7 + 0.22 * w) * (bossPhase ? 0.6 : 1) * 2.3 * (window.__D || 1)
-      * (n < 8 ? 0.8 + 0.025 * n : n > 16 ? 1 + (n - 16) * 0.012 : 1) // ajuste para grupos pequeños / grandes
+    const budget = this.expectedDps() * (0.7 + 0.22 * w) * (bossPhase ? 0.6 : 1) * 1.7 * (window.__D || 1)
+      * (n < 8 ? 0.5 + 0.05 * n : n > 16 ? 1 + (n - 16) * 0.012 : 1) // ajuste para grupos pequeños / grandes
       * ({ easy: 0.7, normal: 1, hard: 1.3 }[this.cfg.difficulty] || 1)
       * (this.hp / this.maxHp < 0.5 ? 0.55 + 0.9 * this.hp / this.maxHp : 1); // si el castillo está muy mal, los enemigos aflojan un poco
     this.spawnAcc += budget * dt;
     const mix = WAVES[w].mix;
     const alive = this.enemies.filter(e => !e.dead).length;
     let guard = 0;
-    const cap = Math.min(70, 8 + n * 1.2 + w * 2);
+    const cap = Math.min(window.__lite ? 55 : 75, 6 + n * 1.1 + w * 1.6);
     if (alive >= cap) this.spawnAcc = Math.min(this.spawnAcc, 0);
     while (this.spawnAcc > 0 && alive + guard < cap && guard < 6) {
       const type = weighted(mix);
@@ -592,11 +642,19 @@ export class Game {
           seg3.closestPointToPoint(center, true, cp);
           const dy = cp.y - center.y;
           if (Math.hypot(cp.x - center.x, cp.z - center.z) < r && Math.abs(dy) < e.unit.height * 0.6 + 0.4) {
-            p.hit.add(e); this.hurt(e, p.dmg, { fire: this.up.fire > 0, frost: this.up.frost > 0 });
+            p.hit.add(e); this.hurt(e, p.dmg, { fire: p.elem === 'fire', frost: p.elem === 'frost' });
             if (p.pierce-- <= 0) { p.life = 0; break; }
           }
         }
-        if (p.mesh.position.y < 0) { p.life = 0; this.fx.emit('dust', p.mesh.position, 2); }
+        // estela del virote elemental
+        if (p.elem === 'fire') { this.fx.emit('fire', p.mesh.position, 2, { scale: 0.9, vy: 0.3 }); if (Math.random() < 0.4) this.fx.emit('smoke', p.mesh.position, 1, { scale: 0.6 }); }
+        else if (p.elem === 'frost') { this.fx.emit('ice', p.mesh.position, 2, { scale: 0.9, vy: 0.2 }); }
+        const gy = groundY(p.mesh.position.x, p.mesh.position.z);
+        if (p.mesh.position.y < gy) {
+          p.life = 0; this.fx.emit(p.elem === 'fire' ? 'fire' : p.elem === 'frost' ? 'ice' : 'dust', p.mesh.position, p.elem ? 8 : 3);
+          // si cae entre la horda, se lleva a alguno por delante
+          for (const m of this.horde.members) if (m.state === 'hold' && Math.hypot(m.x - p.mesh.position.x, m.z - p.mesh.position.z) < 1.6) this.horde.kill(m);
+        }
       } else if (p.kind === 'magic' && Math.random() < 0.6) this.fx.emit(p.fire ? 'fire' : 'magic', p.mesh.position, 1);
       if (p.life <= 0) {
         if (p.kind === 'rock' || p.kind === 'magic') {
@@ -632,14 +690,16 @@ export class Game {
     for (let i = alive.length - 1; i >= 0; i--) {
       const e = alive[i], u = e.unit, pos = u.root.position;
       u.update(dt * (e.slow > 0 ? 0.6 : 1)); e.t += dt;
+      if (u.crew) for (const c of u.crew) c.update(dt);
       if (e.dead) {
         if (e.t > 2.2) { pos.y -= dt * (e.D.flying ? 6 : 1.5); }
-        if (e.D.flying && pos.y > 0) pos.y = Math.max(0, pos.y - dt * 8);
+        const gy = groundY(pos.x, pos.z);
+        if (e.D.flying && pos.y > gy) pos.y = Math.max(gy, pos.y - dt * 8);
         if (e.t > 3.5) { u.dispose(); alive.splice(i, 1); }
         continue;
       }
-      if (e.slow > 0) { e.slow -= dt; if (Math.random() < dt * 4) this.fx.emit('ice', pos.clone().setY(e.D.h * 0.5), 1); }
-      if (e.burn > 0) { e.burn -= dt; e.hp -= dt * 4; if (Math.random() < dt * 10) this.fx.emit('fire', pos.clone().setY(e.D.h * 0.5), 1); if (e.hp <= 0) { this.killEnemy(e); continue; } }
+      if (e.slow > 0) { e.slow -= dt; if (Math.random() < dt * 12) this.fx.emit('ice', pos.clone().add(V(0, e.D.h * 0.6, 0)), 1, { area: 2, vy: 0.3 }); }
+      if (e.burn > 0) { e.burn -= dt; e.hp -= dt * 4; if (Math.random() < dt * 14) this.fx.emit('fire', pos.clone().add(V(0, e.D.h * 0.5, 0)), 1, { area: 1.5 }); if (e.hp <= 0) { this.killEnemy(e); continue; } }
       if (e.hitT > 0) { e.hitT -= dt; continue; }
       u.hpBar(e.hp / e.maxHp, e.isBoss ? 0xa040ff : 0xe74c3c, e.isBoss ? 3 : 1.2);
       if (this.phase === 'ended') continue;
@@ -647,6 +707,7 @@ export class Game {
       if (e.isBoss) { this.updateBoss(e, dt, spd); continue; }
       if (e.state === 'rise') { if (e.t > Math.min(2.4, u.duration('rise'))) { e.state = 'move'; u.play('walk'); } continue; }
       if (e.D.flying) { this.updateFlyer(e, dt, spd); continue; }
+      if (e.D.ram) { this.updateRam(e, dt, spd); continue; }
       if (!e.seg || e.seg.hp <= 0 && !e.inside || Math.random() < dt * 0.2) e.seg = this.pickSegment(pos, e);
       const seg = e.seg;
       if (e.state === 'move') {
@@ -662,7 +723,7 @@ export class Game {
           to.setY(0).normalize();
           const hop = e.D.hop ? Math.max(0, Math.sin(e.t * 6)) : 1;
           pos.addScaledVector(to, spd * dt * (e.D.hop ? hop * 1.8 : 1));
-          if (e.D.hop) pos.y = Math.abs(Math.sin(e.t * 6)) * 0.8;
+          pos.y = groundY(pos.x, pos.z) + (e.D.hop ? Math.abs(Math.sin(e.t * 6)) * 0.8 : 0);
           e.vel = to.clone().multiplyScalar(spd);
           u.faceTo(pos.x + to.x, pos.z + to.z, dt);
           if (u.cur !== 'walk') u.play('walk');
@@ -713,6 +774,48 @@ export class Game {
       if (l.falling) { l.obj.rotation.x -= 0.02 + (l.fall = (l.fall || 0) + 0.003); if (l.obj.rotation.x < -1.6) { l.obj.removeFromParent(); this.ladders.splice(i, 1); } }
     }
   }
+  // ---------- Ariete contra el portón ----------
+  updateRam(e, dt, spd) {
+    const u = e.unit, pos = u.root.position, seg = this.castle.gate.seg; e.seg = seg;
+    if (seg.hp <= 0) {
+      // el portón cayó: sueltan el tronco y entran a pelear
+      if (u.log) { u.log.position.y = 0.4; u.log.rotation.z = 0.3; }
+      e.D = { ...ENEMIES.orc, ladder: false }; e.state = 'move'; u.play('walk');
+      if (u.crew) for (const c of u.crew) c.play('attack');
+      return;
+    }
+    const base = seg.outer.clone().addScaledVector(seg.n, 3.6); base.y = 0;
+    const face = () => u.faceTo(pos.x - seg.n.x, pos.z - seg.n.z, dt, 4);
+    if (e.state === 'move') {
+      const to = base.clone().sub(pos).setY(0), d = to.length();
+      if (d > 0.4) { to.normalize(); pos.addScaledVector(to, spd * dt); pos.y = groundY(pos.x, pos.z); e.vel = to.clone().multiplyScalar(spd); u.faceTo(pos.x + to.x, pos.z + to.z, dt, 3); if (u.cur !== 'walk') { u.play('walk'); u.crew && u.crew.forEach(c => c.play('walk')); } }
+      else { e.state = 'ram'; e.swing = 0; e.vel = null; u.play('idle'); u.crew && u.crew.forEach(c => c.play('idle')); this.hud.feed('🪵 A <b>battering ram</b> is hitting the gate!', 'bad'); }
+      return;
+    }
+    face();
+    e.swing += dt;
+    const k = (e.swing % 2.4) / 2.4;
+    const off = k < 0.62 ? (k / 0.62) * 1.5 : k < 0.72 ? 1.5 - (k - 0.62) / 0.1 * 1.9 : -0.4 + (k - 0.72) / 0.28 * 0.4;
+    pos.copy(base).addScaledVector(seg.n, off); pos.y = 0;
+    const cycle = Math.floor(e.swing / 2.4);
+    if (k > 0.7 && e.lastHit !== cycle) {
+      e.lastHit = cycle;
+      this.damageCastle(18, seg, false, 'ram'); this.shake = Math.max(this.shake, 0.55); S.sfx('boom', 0.7); S.sfx('crack', 0.6);
+      const hitP = seg.outer.clone().setY(1.5);
+      this.fx.emit('dust', hitP, 14, { area: 3 }); this.fx.emit('spark', hitP, 10);
+      this.punch(hitP, 1.2);
+    }
+  }
+  punch(p, t = 1.6) {
+    // acercamiento breve de la cámara a un momento dramático
+    if (this.punchCd > 0 || (this.focus && this.focus.t > 0)) return;
+    this.punchCd = 12; this.focus = { t, target: { position: p.clone() }, zoom: 0.55 };
+  }
+  pickVisibleSegment(pos) {
+    let best = null, bd = 1e9;
+    for (const s of this.castle.segments) { if (s.side === 2) continue; const d = s.outer.distanceToSquared(pos); if (d < bd && s.hp > 0) { bd = d; best = s; } }
+    return best || this.pickSegment(pos);
+  }
   startClimb(e, seg) {
     const ladder = A.clone('deco/ladder'); ladder.scale.set(9, 7.2, 9);
     const base = seg.outer.clone().addScaledVector(seg.along, e.lat).addScaledVector(seg.n, 1.2);
@@ -749,15 +852,16 @@ export class Game {
     e.special -= dt;
     if (B.flying) {
       // el dragón vuela en círculos y escupe fuego sobre las murallas
-      const ang = e.t * 0.35;
-      const target = V(Math.cos(ang) * 24, 14 + Math.sin(e.t) * 1.5, Math.sin(ang) * 24);
+      // vuela de un lado a otro por el frente (siempre a la vista de la cámara)
+      const ang = 1.55 + Math.sin(e.t * 0.22) * 1.75;
+      const target = V(Math.cos(ang) * 26, 14 + Math.sin(e.t) * 1.5, Math.sin(ang) * 26);
       const to = target.clone().sub(pos); const d = to.length();
       if (d > 0.5) pos.addScaledVector(to.normalize(), Math.min(d, Math.max(spd, d * 0.5) * dt * (e.slow > 0 ? 0.6 : 1)));
       u.faceTo(pos.x + to.x, pos.z + to.z, dt, 3);
       u.model.rotation.z = Math.sin(e.t * 2) * 0.12; u.model.position.y = Math.sin(e.t * 3) * 0.4;
       if (e.special <= 0) {
         e.special = 4.5;
-        const s = this.pickSegment(pos, e);
+        const s = this.pickVisibleSegment(pos);
         for (let k = 0; k < 6; k++) setTimeout(() => { if (!e.dead && this.phase === 'playing') this.throwRock(pos.clone().add(V(0, 0, 0)), s.top.clone().add(V(rnd(-4, 4), 0, rnd(-1, 1))), 5, s, { magic: true, fire: true }); }, k * 120);
         S.sfx('fire');
       }
@@ -769,7 +873,7 @@ export class Game {
       const target = seg.hp <= 0 ? KEEP.clone() : seg.outer.clone();
       const to = target.sub(pos).setY(0).normalize();
       pos.addScaledVector(to, spd * dt * (B.hop ? Math.max(0, Math.sin(e.t * 3)) * 2 : 1));
-      if (B.hop) pos.y = Math.abs(Math.sin(e.t * 3)) * 2;
+      pos.y = groundY(pos.x, pos.z) + (B.hop ? Math.abs(Math.sin(e.t * 3)) * 2 : 0);
       e.vel = to.clone().multiplyScalar(spd);
       u.faceTo(pos.x + to.x, pos.z + to.z, dt, 3);
       if (u.cur !== 'walk') u.play('walk', { speed: 0.6 });
@@ -792,7 +896,7 @@ export class Game {
       const nn = 3 + Math.min(5, Math.floor(this.activePlayers() / 4));
       for (let k = 0; k < nn; k++) {
         const a = rnd(0, Math.PI * 2), r = rnd(3, 7);
-        const at = pos.clone().add(V(Math.cos(a) * r, 0, Math.sin(a) * r)); at.y = 0;
+        const at = pos.clone().add(V(Math.cos(a) * r, 0, Math.sin(a) * r)); at.y = groundY(at.x, at.z);
         const m = this.spawnEnemy(B.summon, B.summon === 'skeleton' ? null : at);
         if (B.summon === 'skeleton') { m.unit.root.position.copy(at); m.state = 'rise'; m.t = 0; m.unit.play('rise', { once: true, force: true }); }
       }
@@ -804,3 +908,29 @@ export class Game {
 
 function weighted(mix) { const tot = Object.values(mix).reduce((a, b) => a + b, 0); let r = Math.random() * tot; for (const [k, w] of Object.entries(mix)) { if ((r -= w) <= 0) return k; } return Object.keys(mix)[0]; }
 export function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ---------- utilidades visuales ----------
+const _elemMats = {};
+function elemMat(kind) { return _elemMats[kind] ||= new THREE.MeshBasicMaterial({ color: kind === 'fire' ? 0xff7a1a : 0x8fe8ff }); }
+// Ala de murciélago (izquierda s=-1 o derecha s=1) a partir del modelo, con el pivote en la espalda
+const _wingCache = {};
+function batWing(s) {
+  if (!_wingCache[s]) {
+    const src = A.clone('enemies/batwing');
+    const parts = [];
+    src.updateMatrixWorld(true);
+    src.traverse(o => {
+      if (!o.isMesh) return;
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      g.applyMatrix4(o.matrixWorld);
+      const p = g.attributes.position, keep = [];
+      for (let i = 0; i < p.count; i += 3) { const cx = (p.getX(i) + p.getX(i + 1) + p.getX(i + 2)) / 3; if (Math.sign(cx) === s) for (let j = 0; j < 3; j++) keep.push(p.getX(i + j), p.getY(i + j) - 1.0, p.getZ(i + j)); }
+      const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3)); ng.computeVertexNormals();
+      parts.push(new THREE.Mesh(ng, new THREE.MeshStandardMaterial({ color: o.material.color ? o.material.color.clone().lerp(new THREE.Color(0x3a2a3a), 0.4) : 0x222222, side: THREE.DoubleSide, roughness: 0.9 })));
+    });
+    _wingCache[s] = parts;
+  }
+  const g = new THREE.Group();
+  for (const m of _wingCache[s]) g.add(new THREE.Mesh(m.geometry, m.material));
+  return g;
+}

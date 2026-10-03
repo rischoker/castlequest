@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import * as A from './assets.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const KAY = new Set(['Barbarian', 'Knight', 'Mage', 'Ranger', 'Rogue', 'Rogue_Hooded', 'Skeleton_Mage', 'Skeleton_Minion', 'Skeleton_Rogue', 'Skeleton_Warrior']);
 
@@ -17,15 +18,96 @@ const MAP_Q = {
   cheer: ['Yes', 'Wave', 'Jump'], pickup: ['PickUp'], crawl: ['Crawl'], throw: ['Punch', 'Attack'],
 };
 
+// ---------- Optimización para PCs modestos ----------
+// Los modelos traen muchas piezas (cabeza, brazos, casco…), cada una es una llamada de dibujo.
+// Aquí juntamos todas las piezas que comparten esqueleto en una sola malla con colores por vértice.
+const mergedCache = new Map();
+function optimizeModel(model, key) {
+  const groups = new Map();
+  model.traverse(o => {
+    if (!o.isSkinnedMesh || !o.visible || Array.isArray(o.material)) return;
+    // cada pieza trae su propio objeto Skeleton, pero comparten los mismos huesos
+    const k = o.skeleton.bones.map(b => b.uuid).join(',') + (o.material.map ? '|map' : '|col');
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(o);
+  });
+  let gi = 0;
+  for (const meshes of groups.values()) {
+    const first = meshes[0];
+    // la posición final de un vértice con piel solo depende de su bindMatrix: la "horneamos" en la geometría
+    // y la malla unida usa bindMatrix = identidad (así da igual dónde cuelgue cada pieza)
+    if (meshes.length === 1 && first.material.map) { gi++; continue; }
+    const ck = key + '#' + gi++;
+    let entry = mergedCache.get(ck);
+    if (!entry) {
+      const geos = meshes.map(m => {
+        const g = new THREE.BufferGeometry();
+        const src = m.geometry, n = src.attributes.position.count;
+        for (const a of ['position', 'normal', 'uv', 'skinIndex', 'skinWeight']) if (src.attributes[a]) g.setAttribute(a, src.attributes[a].clone());
+        if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+        if (!g.attributes.normal) g.computeVertexNormals();
+        const c = m.material.color || new THREE.Color(1, 1, 1), col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        if (src.index) g.setIndex(src.index.clone());
+        g.applyMatrix4(m.bindMatrix);
+        return g;
+      });
+      const allIndexed = geos.every(g => g.index);
+      const merged = mergeGeometries(allIndexed ? geos : geos.map(g => g.index ? g.toNonIndexed() : g), false);
+      if (!merged) { continue; }
+      const fm = first.material;
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: fm.map || null, roughness: fm.roughness ?? 0.8, metalness: Math.min(0.3, fm.metalness ?? 0), transparent: false });
+      entry = { geo: merged, mat };
+      mergedCache.set(ck, entry);
+    }
+    const sm = new THREE.SkinnedMesh(entry.geo, entry.mat);
+    sm.name = 'merged';
+    first.parent.add(sm);
+    sm.bind(first.skeleton, new THREE.Matrix4());
+    for (const m of meshes) m.removeFromParent();
+  }
+}
+
+// modelos estáticos (sin animación): todas las piezas en una sola malla con colores por vértice
+function mergeStaticModel(model, key) {
+  const meshes = []; model.updateMatrixWorld(true);
+  model.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && o.visible && !Array.isArray(o.material)) meshes.push(o); });
+  if (meshes.length < 2 || meshes.some(m => m.material.map) && meshes.some(m => !m.material.map)) return;
+  const ck = key + '#static';
+  let entry = mergedCache.get(ck);
+  if (!entry) {
+    const inv = model.matrixWorld.clone().invert();
+    const geos = meshes.map(m => {
+      const src = m.geometry, n = src.attributes.position.count, g = new THREE.BufferGeometry();
+      for (const a of ['position', 'normal', 'uv']) if (src.attributes[a]) g.setAttribute(a, src.attributes[a].clone());
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const c = m.material.color || new THREE.Color(1, 1, 1), col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      if (src.index) g.setIndex(src.index.clone());
+      g.applyMatrix4(inv.clone().multiply(m.matrixWorld));
+      return g.index ? g.toNonIndexed() : g;
+    });
+    const merged = mergeGeometries(geos, false); if (!merged) return;
+    entry = { geo: merged, mat: new THREE.MeshStandardMaterial({ vertexColors: true, map: meshes[0].material.map || null, roughness: 0.8 }) };
+    mergedCache.set(ck, entry);
+  }
+  for (const m of meshes) m.removeFromParent();
+  model.add(new THREE.Mesh(entry.geo, entry.mat));
+}
+
 export class Unit {
-  constructor(key, { height = 1.8, tint, tintAmt = 0.4, emissive } = {}) {
+  constructor(key, { height = 1.8, tint, tintAmt = 0.4, emissive, optimize = true, shadow = true } = {}) {
     this.key = key;
     const short = key.split('/')[1];
     this.isKay = KAY.has(short);
     this.root = new THREE.Group();
     this.model = A.clone(key, { skinned: true });
+    if (optimize) { optimizeModel(this.model, key); if (!A.clips(key).length && !KAY.has(short)) mergeStaticModel(this.model, key); }
     if (tint) A.tint(this.model, tint, tintAmt, emissive);
-    this.model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    this.model.traverse(o => { if (o.isMesh) { o.castShadow = shadow; o.frustumCulled = false; } });
     A.fitHeight(this.model, height);
     this.root.add(this.model);
     this.height = height;
@@ -124,7 +206,7 @@ function blondeHair(tex) {
 
 // La princesa: maga sin sombrero, vestido rosa, corona y una trenza larguísima.
 export function makePrincess() {
-  const u = new Unit('chars/Mage', { height: 2.6 });
+  const u = new Unit('chars/Mage', { height: 2.6, optimize: false });
   u.model.traverse(o => {
     if (!o.isMesh) return;
     if (/Hat/i.test(o.name)) { o.visible = false; return; }

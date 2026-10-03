@@ -11,6 +11,7 @@
 html,body{margin:0;height:100%;overflow:hidden;background:#1b0f07;font-family:Georgia,'Times New Roman',serif;color:var(--parch)}
 #c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #labels{position:fixed;inset:0;pointer-events:none}
+#vig{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:4;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 45%,rgba(160,0,0,.55) 80%,rgba(90,0,0,.9) 100%);transition:opacity .3s}
 .ui{position:fixed;z-index:5}
 .hidden{display:none!important}
 /* ---------- carga ---------- */
@@ -118,6 +119,7 @@ input[type=range]{width:100%}
 <body>
 <canvas id="c"></canvas>
 <div id="labels"></div>
+<div id="vig"></div>
 
 <div id="loading" class="ui"><div>
   <h1>🏰 Castle Quest</h1><div class="tag">English Exam Defense</div>
@@ -176,7 +178,7 @@ input[type=range]{width:100%}
   <div class="tstats" id="tstats"></div>
   <div class="ranking" id="ranking"></div>
   <div style="display:flex;gap:10px;justify-content:center;margin-top:12px"><button class="btn" id="againBtn">🔁 Play again</button></div>
-  <div id="credits">Models: KayKit (Kay Lousberg, CC0) · Quaternius (CC0) · Poly Pizza creators: "Dragon" by jeremy, "Simple Goblin" by Thomas DR (CC-BY) · Questions written in the style of Cambridge English exams (not official material).</div>
+  <div id="credits">Models: KayKit (Kay Lousberg, CC0) · Quaternius (CC0, incl. Monkroose) · Poly Pizza creators: "Dragon" by jeremy, "Simple Goblin" by Thomas DR, "Bat wing" by Poly by Google (CC-BY) · Questions written in the style of Cambridge English exams (not official material).</div>
 </div></div>
 
 <script src="/shared/upgrades.js"></script>
