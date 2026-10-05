@@ -19,7 +19,14 @@ export const ENEMIES = {
   orc:      { name: 'Orcs with Ladders', models: ['enemies/orc'], h: 2.4, hp: 55, speed: 1.6, dps: 7, ladder: true, cost: 60 },
   ogre:     { name: 'Rock-throwing Ogres', models: ['enemies/ogre'], h: 3.8, hp: 120, speed: 1.0, ranged: 'rock', range: 15, dmg: 9, cd: 4.2, tint: 0x7d8f5a, cost: 130 },
   monkey:   { name: 'Flying Monkeys', models: ['enemies/monkey'], h: 1.5, hp: 16, speed: 4.2, flying: true, dps: 2.2, wings: 'bat', cost: 34 },
-  ram:      { name: 'Battering Rams', models: ['enemies/orc'], h: 2.4, hp: 150, speed: 1.25, ram: true, dps: 0, tint: 0x5a6a3a, tintAmt: 0.25, cost: 140 },
+  ram:      { name: 'Battering Rams', vehicle: 'kn/e-siege-ram', wreck: 'kn/e-siege-ram-demolished', h: 2.6, hp: 150, speed: 1.25, ram: true, dps: 0, cost: 140, max: 2,
+              crew: { model: 'enemies/orc', h: 2.9, at: [[-1.5, -2.4], [1.5, -2.4], [0, -3.4]] } },
+  catapult: { name: 'Siege Catapults', vehicle: 'kn/e-siege-catapult', wreck: 'kn/e-siege-catapult-demolished', h: 3.0, hp: 90, speed: 1.3, artillery: true, arm: 'catapult', dmg: 7, cd: 7, stopR: [31, 35], cost: 110, max: 3,
+              crew: { model: 'enemies/imp', h: 1.9, at: [[-2.1, -0.6], [2.1, -1.2]] } },
+  trebuchet: { name: 'Trebuchets', vehicle: 'kn/e-siege-trebuchet', wreck: 'kn/e-siege-trebuchet-demolished', h: 5.2, hp: 160, speed: 0.9, artillery: true, arm: 'arm', big: true, dmg: 12, cd: 9.5, stopR: [34, 37], cost: 170, max: 2,
+              crew: { model: 'enemies/orc', h: 2.8, at: [[-2.6, -1], [2.6, -1.6]] } },
+  siegetower: { name: 'Siege Towers', vehicle: 'kn/e-siege-tower', wreck: 'kn/e-siege-tower-demolished', h: 6.4, hp: 230, speed: 0.7, tower: true, dps: 5, reach: 2.4, cost: 210, max: 2,
+              crew: { model: 'enemies/orc', h: 2.8, at: [[-1.2, -3], [1.2, -3]] } },
   witch:    { name: 'Flying Witches', models: ['chars/Mage'], h: 1.9, hp: 34, speed: 3.2, flying: true, dps: 3.5, broom: true, tint: 0x3d7a3a, tintAmt: 0.55, cost: 45 },
   darkmage: { name: 'Dark Mages', models: ['chars/Skeleton_Mage'], h: 2.1, hp: 40, speed: 1.5, ranged: 'magic', range: 13, dmg: 6, cd: 3, tint: 0x5a2a8a, cost: 55 },
   troll:    { name: 'Stone Trolls', models: ['enemies/goblin'], h: 3.4, hp: 170, speed: 0.9, dps: 14, tint: 0x8a8f9a, tintAmt: 0.3, cost: 170 },
@@ -28,10 +35,10 @@ export const ENEMIES = {
 export const WAVES = [
   { title: 'The Dead Awaken', mix: { zombie: 1 } },
   { title: 'Bones in the Grass', mix: { zombie: 0.5, skeleton: 1 } },
-  { title: 'Goblin Raid', mix: { skeleton: 0.5, zombie: 0.3, goblin: 1 } },
-  { title: 'Orcs at the Walls', mix: { goblin: 0.6, skeleton: 0.4, orc: 1, ram: 0.12 } },
-  { title: 'Ogres and Flying Monkeys', mix: { orc: 0.6, goblin: 0.4, ogre: 0.35, monkey: 0.9, ram: 0.12 } },
-  { title: 'The Dark Army', mix: { troll: 0.25, witch: 0.6, darkmage: 0.45, mimic: 0.35, orc: 0.5, ogre: 0.2, monkey: 0.4, ram: 0.12 } },
+  { title: 'Goblin Raid', mix: { skeleton: 0.5, zombie: 0.3, goblin: 1, catapult: 0.1 } },
+  { title: 'Orcs at the Walls', mix: { goblin: 0.6, skeleton: 0.4, orc: 1, ram: 0.12, catapult: 0.1, siegetower: 0.07 } },
+  { title: 'Ogres and Flying Monkeys', mix: { orc: 0.6, goblin: 0.4, ogre: 0.35, monkey: 0.9, ram: 0.12, catapult: 0.08, trebuchet: 0.06, siegetower: 0.07 } },
+  { title: 'The Dark Army', mix: { troll: 0.25, witch: 0.6, darkmage: 0.45, mimic: 0.35, orc: 0.5, ogre: 0.2, monkey: 0.4, ram: 0.12, catapult: 0.07, trebuchet: 0.07, siegetower: 0.07 } },
 ];
 export const BOSSES = {
   A1: { name: 'Grumbo the Ogre King', model: 'enemies/ogre', h: 8, tint: 0x6b4a2a, attack: 'rocks', line: 'Grumbo hungry! Grumbo smash castle!' },
@@ -175,6 +182,9 @@ export class Game {
     const segs = this.castle.segments.filter(s => s.side !== 2);
     const seg = pick(segs.filter(s => s.hp > 0).length ? segs.filter(s => s.hp > 0) : segs);
     const ang = Math.atan2(seg.n.z, seg.n.x) + rnd(-0.5, 0.5);
+    // si hay catapultas emplazadas, el castigo sale de una de ellas
+    const art = this.enemies.filter(e => !e.dead && e.D.artillery && e.state === 'siege' && e.fireT == null);
+    if (art.length) { const a = pick(art); this.artilleryShot(a, seg, amt, true); return; }
     const from = V(Math.cos(ang) * 32, 0, Math.sin(ang) * 32); from.y = groundY(from.x, from.z) + 2;
     this.throwRock(from, seg.top.clone().add(V(rnd(-3, 3), 0.5, 0)), amt, seg, { fire: true, penalty: true });
   }
@@ -235,9 +245,9 @@ export class Game {
     const unit = new Unit('chars/peasant', { height: 1.9, tint: golden ? 0xffd34e : null, tintAmt: 0.35, emissive: golden ? 0x6a4a00 : null, shadow: false });
     const sz = 37 + rnd(-1.5, 1.5); const start = V(GATE_POS.x + Math.sin(sz * 0.08) * 3 + rnd(-1.2, 1.2), 0, sz); start.y = groundY(start.x, start.z);
     unit.root.position.copy(start);
-    // carretilla con suministros
-    const cart = A.clone('deco/wheelbarrow'); cart.scale.setScalar(6.5); cart.position.set(0, 0, 1.2); cart.rotation.y = Math.PI; unit.root.add(cart);
-    const load = A.clone(golden ? 'res/Gold_Bars_Stack_Small' : pick(['res/Stone_Bricks_Stack_Small', 'res/Wood_Planks_Stack_Small', 'res/Iron_Bars_Stack_Small'])); load.scale.setScalar(0.55); load.position.set(0, 0.55, 1.35); unit.root.add(load);
+    // carreta (Kenney) que el aldeano jala: sacos de suministros, o lingotes de oro si es dorada
+    const cart = A.clone(golden ? 'kn/cart' : 'kn/cart-high'); cart.scale.setScalar(1.9); cart.position.set(0, 0, -1.75); cart.rotation.y = Math.PI; unit.root.add(cart);
+    if (golden) { const load = A.clone('res/Gold_Bars_Stack_Small'); load.scale.setScalar(0.6); load.position.set(0, 0.55, -1.75); unit.root.add(load); }
     this.scene.add(unit.root);
     unit.label(`<span>${esc(pl.name)}</span>${golden ? ' ✨' : ''}`, 'vplate' + (golden ? ' gold' : ''));
     unit.play('walk', { speed: 0.9 });
@@ -354,12 +364,13 @@ export class Game {
   // ---------- Enemigos ----------
   spawnEnemy(type, at) {
     const D = ENEMIES[type];
-    const unit = new Unit(pick(D.models), { height: D.h * 1.25, tint: D.tint, tintAmt: D.tintAmt ?? 0.45, shadow: false });
+    const unit = D.vehicle ? this.makeVehicle(D) : new Unit(pick(D.models), { height: D.h * 1.25, tint: D.tint, tintAmt: D.tintAmt ?? 0.45, shadow: false });
     // la mayoría llega por los lados que ve la cámara (frente, izquierda y derecha)
     const a = Math.random() < 0.8 ? rnd(-0.35, 3.5) : rnd(3.5, 5.93);
     let r = D.rise ? rnd(24, 32) : rnd(46, 52);
     let pos = at ? at.clone() : null;
-    if (!pos && !D.flying && !D.rise && !D.ram) pos = this.horde.take(a); // sale de la horda
+    if (D.vehicle) r = rnd(46, 50);
+    if (!pos && !D.flying && !D.rise && !D.vehicle) pos = this.horde.take(a); // sale de la horda
     if (!pos) pos = V(Math.cos(a) * r, 0, Math.sin(a) * r);
     if (D.ram) { const gz = 46; pos = V(GATE_POS.x + rnd(-14, 14), 0, gz); }
     pos.y = D.flying ? rnd(8, 11) : groundY(pos.x, pos.z);
@@ -368,27 +379,82 @@ export class Game {
     this.scene.add(unit.root);
     const hpMul = 1 + Math.min(this.wave, 5) * 0.08;
     const e = { type, D, unit, hp: D.hp * hpMul, maxHp: D.hp * hpMul, state: 'move', t: 0, cd: rnd(0, D.cd || 1), seg: null, slow: 0, burn: 0, lat: rnd(-3.5, 3.5) };
+    if (D.artillery) e.stopR = rnd(D.stopR[0], D.stopR[1]);
+    if (D.vehicle) { unit.root.rotation.y = Math.atan2(-pos.x, -pos.z); this.hud.feed(`⚙️ ${D.name.replace(/s$/, '')} approaching!`, 'bad'); }
     if (D.rise && !at) { e.state = 'rise'; unit.play('rise', { once: true }); e.t = 0; this.fx.emit('dust', pos, 10); }
     else unit.play('walk');
     this.enemies.push(e);
     return e;
+  }
+  // Máquinas de asedio (Kenney): ariete, catapulta, trebuchet y torre. El modelo mira a +X; lo giramos a +Z.
+  makeVehicle(D) {
+    const u = new Unit(D.vehicle, { height: D.h, optimize: false, weapons: false, shadow: true });
+    u.static = false; u.model.rotation.y = -Math.PI / 2;
+    u.wheels = []; u.model.traverse(o => { if (o.name === 'wheel') u.wheels.push(o); if (D.arm && o.name === D.arm && !u.arm) { u.arm = o; u.armRest = o.rotation.z; } });
+    u.crew = [];
+    for (const [x, z] of D.crew.at) { const c = new Unit(D.crew.model, { height: D.crew.h, shadow: false }); c.root.position.set(x, 0, z); c.play('walk'); u.root.add(c.root); u.crew.push(c); }
+    return u;
+  }
+  wreckVehicle(e) {
+    const u = e.unit; if (u.wrecked) return; u.wrecked = true;
+    const w = A.clone(e.D.wreck); w.scale.copy(u.model.scale); w.rotation.y = -Math.PI / 2; w.position.y = u.baseY; u.root.add(w); u.model.visible = false;
+    const p = u.root.position.clone().setY(u.root.position.y + 1);
+    this.fx.emit('smoke', p, 24, { area: 3 }); this.fx.emit('fire', p, 18, { area: 2.5 }); this.fx.emit('dust', p, 16, { area: 3 });
+    S.sfx('boom', 0.8); S.sfx('crack', 0.6); this.shake = Math.max(this.shake, 0.35);
+    this.fx.text(p.clone().setY(p.y + e.D.h), '💥 Destroyed!', 'good');
+  }
+  towerUnload(e, seg) {
+    // la torre de asedio baja su pasarela: los orcos saltan al adarve y entran al patio
+    S.sfx('warcry'); this.shake = Math.max(this.shake, 0.4);
+    this.damageCastle(20, seg, false, 'tower');
+    this.fx.text(seg.top.clone().add(V(0, 2.5, 0)), 'Orcs storm the wall!', 'bad');
+    this.hud.feed('🏰 A <b>siege tower</b> reached the wall!', 'bad');
+    for (let i = 0; i < 3; i++) setTimeout(() => {
+      if (this.phase !== 'playing') return;
+      const p = seg.inner.clone().addScaledVector(seg.along, (i - 1) * 1.6);
+      const o = this.spawnEnemy('orc', p); o.inside = true; o.seg = seg; this.fx.emit('dust', p, 8);
+    }, 500 + i * 450);
+  }
+  updateArtillery(e, dt, spd) {
+    const u = e.unit, pos = u.root.position, D = e.D;
+    if (e.state === 'move') {
+      const r = Math.hypot(pos.x, pos.z);
+      if (r > e.stopR) {
+        const to = V(-pos.x, 0, -pos.z).normalize();
+        pos.addScaledVector(to, spd * dt); pos.y = groundY(pos.x, pos.z); e.vel = to.multiplyScalar(spd);
+        u.faceTo(pos.x + e.vel.x, pos.z + e.vel.z, dt, 3);
+      } else { e.state = 'siege'; e.vel = null; e.cd = rnd(1, 3); u.crew.forEach(c => c.play('idle')); this.hud.feed(`🪨 A <b>${D.name.replace(/s$/, '').toLowerCase()}</b> is bombarding the castle!`, 'bad'); }
+      return;
+    }
+    if (!e.seg || e.seg.hp <= 0) { const segs = this.castle.segments.filter(s => s.hp > 0 && s.side !== 2); e.seg = segs.sort((a, b) => a.outer.distanceToSquared(pos) - b.outer.distanceToSquared(pos))[0] || this.castle.segments[0]; }
+    u.faceTo(e.seg.center.x, e.seg.center.z, dt, 2);
+    e.cd -= dt;
+    if (e.cd <= 0 && e.fireT == null) { e.cd = D.cd * rnd(0.85, 1.15); this.artilleryShot(e, e.seg, D.dmg, false); }
+  }
+  artilleryShot(e, seg, dmg, penalty) {
+    const u = e.unit; e.fireT = 0; e.shotDone = false; e.shot = { seg, dmg, penalty };
+    u.crew.forEach(c => c.play('attack', { once: true, force: true }));
+  }
+  animateArtillery(e, dt) {
+    const u = e.unit; if (e.fireT == null) return;
+    e.fireT += dt; const t = e.fireT;
+    // el brazo se dispara rápido y vuelve despacio
+    const swing = t < 0.3 ? t / 0.3 : Math.max(0, 1 - (t - 0.6) / 1.4);
+    if (u.arm) u.arm.rotation.z = u.armRest - swing * (e.D.big ? 1.9 : 1.3);
+    if (!e.shotDone && t > 0.25) {
+      e.shotDone = true; const { seg, dmg, penalty } = e.shot;
+      const from = u.root.position.clone().add(V(0, e.D.h * 0.9, 0));
+      const to = seg.top.clone().add(V(rnd(-3, 3), 0.5, 0));
+      this.throwRock(from, to, dmg, seg, { fire: true, big: e.D.big, penalty });
+      S.sfx('whoosh', 0.9); this.fx.emit('smoke', from, 4);
+    }
+    if (t > 2.2) { e.fireT = null; u.crew.forEach(c => c.play('idle')); }
   }
   decorate(unit, D) {
     if (D.wings) {
       // alas de murciélago: separamos el modelo en ala izquierda y derecha para que aleteen
       unit.wings = [];
       for (const s of [-1, 1]) { const w = batWing(s); w.scale.setScalar(D.h * 0.24); w.position.set(0, D.h * 1.25 * 0.62, -0.25); w.rotation.x = -0.25; unit.root.add(w); unit.wings.push({ w, s }); }
-    }
-    if (D.ram) {
-      // ariete: un tronco con punta de hierro cargado por tres orcos
-      const log = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 7, 8), new THREE.MeshStandardMaterial({ color: 0x8a5a2e, roughness: 1 })); trunk.rotation.x = Math.PI / 2; log.add(trunk);
-      const capM = new THREE.MeshStandardMaterial({ color: 0x55585e, metalness: 0.7, roughness: 0.4 });
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 8), capM); cap.rotation.x = Math.PI / 2; cap.position.z = 3.8; log.add(cap);
-      for (const z of [-2, 0, 2]) { const band = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.06, 4, 10), capM); band.position.z = z; log.add(band); }
-      log.position.set(0, 1.5, -0.4); log.traverse(o => { if (o.isMesh) o.castShadow = true; }); unit.root.add(log); unit.log = log;
-      unit.crew = [];
-      for (const [x, z] of [[1.3, -1.4], [-1.3, -2.6]]) { const c = new Unit('enemies/orc', { height: D.h * 1.25, tint: D.tint, tintAmt: 0.25, shadow: false }); c.root.position.set(x, 0, z); c.play('walk'); unit.root.add(c.root); unit.crew.push(c); }
     }
     if (D.broom) {
       const broom = new THREE.Group();
@@ -443,6 +509,7 @@ export class Game {
   killEnemy(e, silent) {
     if (e.dead) return; e.dead = true; e.state = 'dead'; e.t = 0;
     e.unit.play('death', { once: true });
+    if (e.D.vehicle && !silent) this.wreckVehicle(e);
     if (e.unit.crew) for (const c of e.unit.crew) c.play('death', { once: true });
     if (e.unit.bar) e.unit.bar.visible = false;
     if (e.ladder) { e.ladder.falling = true; }
@@ -606,7 +673,9 @@ export class Game {
     const cap = Math.min(window.__lite ? 55 : 75, 6 + n * 1.1 + w * 1.6);
     if (alive >= cap) this.spawnAcc = Math.min(this.spawnAcc, 0);
     while (this.spawnAcc > 0 && alive + guard < cap && guard < 6) {
-      const type = weighted(mix);
+      let type = weighted(mix);
+      // pocas máquinas de asedio a la vez (si ya hay demasiadas, sale infantería)
+      if (ENEMIES[type].max && this.enemies.filter(x => !x.dead && x.type === type).length >= ENEMIES[type].max) type = Object.keys(mix).find(k => !ENEMIES[k].vehicle) || 'zombie';
       this.spawnAcc -= ENEMIES[type].cost * (1 + Math.min(this.wave, 5) * 0.08); guard++;
       this.spawnEnemy(type);
     }
@@ -715,7 +784,7 @@ export class Game {
               if (p.seg) p.seg.burning = Math.max(p.seg.burning || 0, 2);
             } else {
               this.damageCastle(p.dmg, p.seg && p.seg.hp > 0 ? p.seg : null, false, 'proj:' + p.kind);
-              if (p.fire && p.seg) p.seg.burning = 6;
+              if (p.fire && p.seg) p.seg.burning = Math.max(p.seg.burning || 0, 3);
             }
           }
         }
@@ -743,6 +812,7 @@ export class Game {
       u.update(dt * (e.slow > 0 ? 0.6 : 1)); e.t += dt;
       if (u.crew) for (const c of u.crew) c.update(dt);
       if (e.dead) {
+        if (e.D.vehicle) { if (e.t > 9) pos.y -= dt * 0.8; if (e.t > 12) { u.dispose(); alive.splice(i, 1); } continue; }
         if (e.t > 2.2) { pos.y -= dt * (e.D.flying ? 6 : 1.5); }
         const gy = groundY(pos.x, pos.z);
         if (e.D.flying && pos.y > gy) pos.y = Math.max(gy, pos.y - dt * 8);
@@ -758,6 +828,8 @@ export class Game {
       if (e.isBoss) { this.updateBoss(e, dt, spd); continue; }
       if (e.state === 'rise') { if (e.t > Math.min(2.4, u.duration('rise'))) { e.state = 'move'; u.play('walk'); } continue; }
       if (e.D.flying) { this.updateFlyer(e, dt, spd); continue; }
+      if (u.wheels && e.vel) for (const w of u.wheels) w.rotation.z -= dt * spd * 1.8;
+      if (e.D.artillery) { this.animateArtillery(e, dt); this.updateArtillery(e, dt, spd); continue; }
       if (e.D.ram) { this.updateRam(e, dt, spd); continue; }
       if (!e.seg || e.seg.hp <= 0 && !e.inside || Math.random() < dt * 0.2) e.seg = this.pickSegment(pos, e);
       const seg = e.seg;
@@ -765,7 +837,7 @@ export class Game {
         let target;
         if (seg.hp <= 0 || e.inside) { target = KEEP.clone().add(V(e.lat, 0, 6)); e.inside = e.inside || pos.distanceTo(seg.center) < 2.5; if (!e.inside) target = seg.center.clone(); }
         else target = seg.outer.clone().addScaledVector(seg.along, e.lat);
-        const stopDist = e.D.ranged ? e.D.range : 0.6;
+        const stopDist = e.D.ranged ? e.D.range : (e.D.reach || 0.6);
         const to = target.clone().sub(pos).setY(0); const dist = to.length();
         if (dist > stopDist) {
           to.normalize();
@@ -782,6 +854,8 @@ export class Game {
         } else {
           e.vel = null;
           if (e.D.ladder && seg.hp > 0 && !e.inside) { this.startClimb(e, seg); continue; }
+          if (e.D.tower && !e.unloaded && seg.hp > 0) { e.unloaded = true; this.towerUnload(e, seg); }
+          if (u.crew) u.crew.forEach(c => c.play('attack'));
           e.state = e.D.ranged ? 'ranged' : 'attack'; u.play('attack');
           u.faceTo(seg.center.x, seg.center.z);
         }
@@ -835,9 +909,9 @@ export class Game {
     const u = e.unit, pos = u.root.position, seg = this.castle.gate.seg; e.seg = seg;
     if (seg.hp <= 0) {
       // el portón cayó: sueltan el tronco y entran a pelear
-      if (u.log) { u.log.position.y = 0.4; u.log.rotation.z = 0.3; }
-      e.D = { ...ENEMIES.orc, ladder: false }; e.state = 'move'; u.play('walk');
-      if (u.crew) for (const c of u.crew) c.play('attack');
+      // el portón cayó: los orcos abandonan el ariete y entran a pelear
+      for (const c of u.crew) { const wp = c.root.getWorldPosition(V()); c.dispose(); this.spawnEnemy('orc', wp); }
+      u.crew = []; this.killEnemy(e, true);
       return;
     }
     const base = seg.outer.clone().addScaledVector(seg.n, 3.6); base.y = 0;

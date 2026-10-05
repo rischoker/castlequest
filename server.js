@@ -13,7 +13,7 @@ const FEEDBACK = require('./public/shared/feedback.js');
 // Al arrancar, si falta la carpeta public/assets, se descomprime automáticamente.
 (function ensureAssets() {
   const dir = path.join(__dirname, 'public', 'assets'), zip = path.join(__dirname, 'assets.zip');
-  const marker = path.join(dir, 'anims', 'General.glb');
+  const marker = path.join(dir, 'kn', 'siege-ballista.glb'); // cambia cuando hay assets nuevos
   if (fs.existsSync(marker) || !fs.existsSync(zip)) return;
   console.log('Descomprimiendo assets.zip…');
   new (require('adm-zip'))(zip).extractAllTo(path.join(__dirname, 'public'), true);

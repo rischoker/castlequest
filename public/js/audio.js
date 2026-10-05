@@ -81,8 +81,34 @@ let musicTimer = null, musicMode = 'calm', step = 0;
 const SCALE = [146.8, 164.8, 174.6, 196, 220, 246.9, 261.6, 293.7]; // D dórico
 const MEL_CALM = [0, 2, 4, 3, 2, 1, 0, -1, 0, 4, 5, 4, 3, 2, 1, 2];
 const MEL_WAR = [0, 0, 4, 0, 3, 2, 0, -1, 0, 0, 5, 4, 3, 4, 2, 1];
+// Pistas reales (lobby y batalla) en streaming con <audio>; si no cargan, se usa el loop sintetizado.
+const TRACKS = { calm: '/assets/sfx/music_lobby.mp3', war: '/assets/sfx/music_battle.mp3', boss: '/assets/sfx/music_battle.mp3' };
+const VOL = { calm: 0.75, war: 0.7, boss: 0.95 };
+const els = {}; let curTrack = null, trackFail = false;
+function trackEl(src) {
+  if (els[src]) return els[src];
+  const a = new Audio(src); a.loop = true; a.preload = 'auto'; a.crossOrigin = 'anonymous';
+  const g = ctx.createGain(); g.gain.value = 0; ctx.createMediaElementSource(a).connect(g).connect(musicBus);
+  a.addEventListener('error', () => { trackFail = true; if (curTrack === src) { curTrack = null; synthMusic(musicMode); } });
+  return (els[src] = { a, g });
+}
+function fadeTo(e, v, d = 1.2) { const t = ctx.currentTime; e.g.gain.cancelScheduledValues(t); e.g.gain.setValueAtTime(e.g.gain.value, t); e.g.gain.linearRampToValueAtTime(v, t + d); }
 export function music(mode) {
   if (!ctx) return;
+  musicMode = mode;
+  const src = TRACKS[mode];
+  if (!trackFail) {
+    for (const k in els) if (k !== src) { const e = els[k]; fadeTo(e, 0); setTimeout(() => { if (curTrack !== k) e.a.pause(); }, 1300); }
+    curTrack = src || null;
+    if (!src) { clearInterval(musicTimer); musicTimer = null; return; }
+    const e = trackEl(src);
+    if (e.a.paused) { e.a.currentTime = 0; e.a.play().catch(() => { }); }
+    fadeTo(e, VOL[mode] || 0.7);
+    clearInterval(musicTimer); musicTimer = null; return;
+  }
+  synthMusic(mode);
+}
+function synthMusic(mode) {
   musicMode = mode;
   if (mode === 'off') { clearInterval(musicTimer); musicTimer = null; return; }
   if (musicTimer) return;
@@ -98,6 +124,8 @@ export function music(mode) {
   }, musicMode === 'calm' ? 360 : 240);
 }
 export function restartMusic(mode) { clearInterval(musicTimer); musicTimer = null; music(mode); }
+// jingle de entrada (voz del Arcade)
+export function intro() { if (!ctx || muted) return; const a = new Audio('/assets/sfx/intro.mp3'); const g = ctx.createGain(); g.gain.value = 1; try { ctx.createMediaElementSource(a).connect(g).connect(sfxBus); } catch { } a.play().catch(() => { }); }
 
 // ---------- Voces (síntesis del navegador, en inglés) ----------
 let voices = [];

@@ -81,7 +81,7 @@ async function boot() {
   if (params.has('noui')) document.querySelectorAll('.ui').forEach(e => e.style.display = 'none');
 }
 function enter() {
-  S.init(); S.resume(); S.music('calm');
+  S.init(); S.resume(); S.intro(); setTimeout(() => S.music('calm'), 1800);
   $('loading').classList.add('hidden');
   showLobby();
   connect();

@@ -17,14 +17,6 @@ El proyector muestra el castillo en 3D y los estudiantes responden preguntas en 
 
 La dificultad se adapta al **ritmo** del grupo (cuántas preguntas responden), no a sus aciertos. Así, un grupo que acierta más gana con holgura y uno que acierta menos tiene que esforzarse. Si un grupo tiene problemas, usa la dificultad *Easy* o sube el tiempo por pregunta.
 
-
-## Cómo se gana o se pierde
-- **Cada respuesta incorrecta (o sin responder) es un golpe directo al castillo:** una roca en llamas sale de la horda y baja la barra. El golpe se ajusta al tamaño del grupo, para que en toda la partida pese lo mismo con 3 o con 30 estudiantes.
-- **Cada respuesta correcta** trae virotes y repara un poco.
-- **Las ballestas solo disparan con virotes:** sin respuestas correctas no hay defensa. Los arqueros y los defensores del patio son ambientación y no hacen daño real.
-- Los enemigos se ajustan al ritmo y al acierto del grupo, y desgastan el castillo como mucho a un ritmo limitado. Lo que decide la partida son las respuestas: en las pruebas, un grupo que acierta menos del ~55% suele perder y uno por encima del ~65% suele ganar.
-- La dificultad (Easy / Normal / Hard) cambia el tamaño de los golpes y la cantidad de enemigos.
-
 ## Publicar en Render (gratis)
 1. Sube esta carpeta a un repositorio de GitHub (por ejemplo `rischoker/castle-quest`).
 2. En Render ve a **New → Blueprint**, elige el repositorio y Render lee `render.yaml` automáticamente.
@@ -70,8 +62,6 @@ Si el PC del salón va lento, el juego baja la resolución y luego apaga las som
 Puedes forzar el modo ligero con `/?lite` o la calidad alta con `/?hq`.
 
 ## Créditos de modelos
-KayKit (Kay Lousberg, CC0) · Quaternius (CC0) · Poly Pizza: "Dragon" de jeremy, "Simple Goblin" de Thomas DR (CC-BY).
+KayKit (Kay Lousberg, CC0) · Kenney (Castle Kit, Fantasy Town Kit, CC0) · Quaternius (CC0, incl. Monkroose) · Poly Pizza: "Dragon" de jeremy, "Simple Goblin" de Thomas DR, "Bat wing" de Poly by Google (CC-BY).
 
-## Sobre `assets.zip`
-Los modelos 3D, las animaciones, las armas y los retratos están dentro de `assets.zip`, así el repositorio queda con menos de 40 archivos y se puede subir desde la web de GitHub.
-Al arrancar, el servidor lo descomprime en `public/assets/`. Si cambias modelos, vuelve a comprimir esa carpeta como `assets.zip`.
+Assets nuevos de Kenney: `python3 tools/kenney-tex.py && node tools/build-kenney.mjs` (ajusta colores y los copia a public/assets/kn). Música: public/assets/sfx/music_lobby.mp3 y music_battle.mp3.

@@ -196,13 +196,46 @@ export function buildScenery(realScene) {
   for (let k = 0; k < 9; k++) {
     const a = -0.25 + k / 8 * 3.6 + rnd(-0.1, 0.1), r = rnd(64, 70), cx = Math.cos(a) * r, cz = Math.sin(a) * r;
     if (Math.abs(cz - RIVER_Z(cx)) < 9 || (cz > 20 && Math.abs(cx - ROAD_X(cz)) < 10)) continue;
-    for (let i = 0; i < 3; i++) place('deco/tent', cx + rnd(-5, 5), cz + rnd(-4, 4), { s: rnd(6, 8), ry: rnd(0, 6), scene: near });
+    for (let i = 0; i < 3; i++) place(i ? 'kn/e-tent' : 'deco/tent', cx + rnd(-5, 5), cz + rnd(-4, 4), { s: i ? rnd(3.6, 4.4) : rnd(6, 8), ry: rnd(0, 6), scene: near });
+    for (let i = 0; i < 2; i++) place('kn/e-flag-wide', cx + rnd(-6, 6), cz + rnd(-5, 5), { s: rnd(3.6, 4.4), ry: Math.atan2(-cx, -cz) + Math.PI / 2, scene: near });
     place('res/Wood_Log_Stack', cx, cz, { s: 1.3, ry: rnd(0, 6), scene: near });
     fires.push(new THREE.Vector3(cx, groundY(cx, cz) + 0.6, cz));
   }
   // puente sobre el río en el camino
   const bz = RIVER_Z(ROAD_X(43)), bx = ROAD_X(bz);
   place('castle/bridge_A', bx, bz, { s: 4.2, ry: Math.PI / 2, y: waterY(bx) + 0.15, scene: near });
+  scene = near;
+  // ruinas de asedios anteriores en el campo de batalla
+  const wrecks = ['e-siege-catapult-demolished', 'e-siege-trebuchet-demolished', 'e-siege-ram-demolished', 'e-siege-tower-demolished'];
+  for (let i = 0; i < 7; i++) {
+    const a = rnd(-0.3, 3.45), r = rnd(37, 56), x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.abs(z - RIVER_Z(x)) < 7 || (z > 15 && Math.abs(x - ROAD_X(z)) < 7)) continue;
+    place('kn/' + wrecks[i % 4], x, z, { s: rnd(2.8, 3.4), ry: rnd(0, 6), scene });
+  }
+  // peñascos, troncos y piedras en las laderas
+  for (let i = 0; i < 18; i++) {
+    const a = rnd(0, Math.PI * 2), r = rnd(26, 60), x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.abs(z - RIVER_Z(x)) < 6 || (z > 12 && Math.abs(x - ROAD_X(z)) < 6)) continue;
+    place('kn/' + ['rocks-high', 'rocks-low', 'rocks-ramp', 'tree-log', 'rocks-low', 'tree-trunk'][i % 6], x, z, { s: rnd(3, 4.5), ry: rnd(0, 6), scene });
+  }
+  // parches de tierra y pasto (relieve suave sobre el terreno)
+  scene = far;
+  for (let i = 0; i < 24; i++) {
+    const a = rnd(0, Math.PI * 2), r = rnd(HALF + 6, 70), x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.abs(z - RIVER_Z(x)) < 5) continue;
+    place('kn/patch-grass', x, z, { s: rnd(3, 5.5), ry: rnd(0, 6), scene, shadow: false, y: groundY(x, z) - 0.25 });
+  }
+  scene = near;
+  // la aldea cobra vida: mercado, fuente, faroles, cercas, carretas y un molino de agua
+  const vill = [['kn/fountain-round-detail', 9, 57, 2.6, 0], ['kn/stall-red', -1, 50, 3, 0.3], ['kn/stall-green', 12, 49, 3, -0.4], ['kn/stall', 6, 63, 3, 2.8], ['kn/stall-bench', -2, 59, 3, 1.2],
+    ['kn/cart-high', 14, 58, 3, 0.8], ['kn/cart', -9, 58, 3, 2], ['kn/hedge-large', 23, 54, 3.5, 1.57], ['kn/hedge-large', 23, 57.5, 3.5, 1.57], ['kn/banner-red', 3, 55, 3, 0], ['kn/banner-green', 15, 54, 3, 0],
+    ['kn/tree-high-round', 25, 66, 4, 0], ['kn/tree-crooked', -18, 66, 3.5, 0], ['kn/planks', -20, 50, 3, 0.4], ['kn/wheel', -19, 51, 3, 1]];
+  for (const [k, x, z, sc, ry] of vill) place(k, x, z, { s: sc, ry, scene });
+  for (let i = 0; i < 9; i++) place('kn/fence', -30 + i * 3, 70, { s: 3, ry: Math.PI / 2, scene });
+  for (let i = 0; i < 6; i++) place('kn/fence', 34, 46 + i * 3, { s: 3, ry: 0, scene });
+  const wx = -30, wz = RIVER_Z(wx) + 3.4; place('kn/watermill', wx, wz, { s: 3.6, ry: Math.PI / 2, y: waterY(wx) - 0.6, scene });
+  // faroles a lo largo del camino
+  for (let z = 17; z < 66; z += 7) { if (Math.abs(z - RIVER_Z(ROAD_X(z))) < 6) continue; for (const sd of [-1, 1]) { const x = ROAD_X(z) + sd * 3.6; place('kn/lantern', x, z, { s: 1.9, scene }); } }
   mergeStatic(near, realScene, true); mergeStatic(far, realScene, false);
   // estacas (barricadas) en el campo de batalla: una sola malla instanciada
   const stakeGeo = mergeGeometries([new THREE.CylinderGeometry(0.2, 0.22, 2.2, 5).translate(0, 1.1, 0), new THREE.ConeGeometry(0.2, 0.7, 5).translate(0, 2.55, 0)]);
@@ -227,36 +260,24 @@ export function buildScenery(realScene) {
   return { clouds, fires };
 }
 
-// ---------- Ballesta de asedio (procedural) ----------
-const BALLISTA_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.1 });
+// ---------- Ballesta de asedio (modelo Kenney; gira en yaw/pitch) ----------
 export function makeBallista() {
-  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4b26, roughness: 0.9 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x4a2c16, roughness: 0.9 });
-  const iron = new THREE.MeshStandardMaterial({ color: 0x8a8f96, metalness: 0.6, roughness: 0.4 });
   const root = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 0.5, 8), dark); base.position.y = 0.25; root.add(base);
-  const yaw = new THREE.Group(); yaw.position.y = 0.5; root.add(yaw);
-  const pitch = new THREE.Group(); pitch.position.y = 0.45; yaw.add(pitch);
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 0.3), wood); post.position.y = -0.15; yaw.add(post);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 2.6), wood); stock.position.z = 0.4; pitch.add(stock);
-  const armGeo = new THREE.BoxGeometry(1.25, 0.14, 0.16);
-  for (const sgn of [-1, 1]) {
-    const arm = new THREE.Mesh(armGeo, dark); arm.position.set(sgn * 0.7, 0.05, 1.35); arm.rotation.y = sgn * 0.42; pitch.add(arm);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), iron); tip.position.set(sgn * 1.27, 0.05, 1.05); pitch.add(tip);
-  }
-  const strGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1.27, 0.06, 1.05), new THREE.Vector3(0, 0.12, -0.5), new THREE.Vector3(1.27, 0.06, 1.05)]);
-  const string = new THREE.Line(strGeo, new THREE.LineBasicMaterial({ color: 0xeeeeee })); pitch.add(string);
-  const bolt = makeBoltMesh(); bolt.position.set(0, 0.2, 0.5); pitch.add(bolt);
-  // juntamos las piezas de madera/hierro del cuerpo en una sola malla (menos llamadas de dibujo)
-  const parts = pitch.children.filter(o => o.isMesh);
-  if (parts.length > 1) {
-    pitch.updateMatrix();
-    const geos = parts.map(o => { o.updateMatrix(); const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix); const n = g.attributes.position.count, c = o.material.color, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k); return g; });
-    for (const o of parts) o.removeFromParent();
-    pitch.add(new THREE.Mesh(mergeGeometries(geos), BALLISTA_MAT));
+  const yaw = new THREE.Group(); root.add(yaw);
+  const pitch = new THREE.Group(); pitch.position.y = 0.55; yaw.add(pitch);
+  const m = A.clone('kn/siege-ballista'); m.scale.setScalar(1.65); m.rotation.y = -Math.PI / 2; m.position.y = -0.55; pitch.add(m);
+  let bolt = null; m.traverse(o => { if (o.name === 'arrow') bolt = o; });
+  // cuerpo + ruedas en una sola malla (el virote queda aparte para esconderlo al disparar)
+  if (bolt) {
+    root.updateMatrixWorld(true);
+    const rel = pitch.matrixWorld.clone().invert().multiply(bolt.matrixWorld);
+    bolt.removeFromParent();
+    const tmp = new THREE.Group(); mergeStatic(m, tmp, true); m.removeFromParent();
+    for (const c of [...tmp.children]) { c.position.y = -0.55; pitch.add(c); }
+    rel.decompose(bolt.position, bolt.quaternion, bolt.scale); pitch.add(bolt);
   }
   root.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  root.userData = { yaw, pitch, bolt, string };
+  root.userData = { yaw, pitch, bolt: bolt || new THREE.Group() };
   return root;
 }
 export function makeBoltMesh() {
@@ -303,6 +324,14 @@ export function buildCastle(scene) {
       b.position.copy(center).addScaledVector(sd.n, 0.3).setY(isGate ? WALL_H + 0.55 : WALK_Y + 0.15);
       b.rotation.y = Math.atan2(sd.n.x, sd.n.z); scene.add(b);
       seg.ballista = { obj: b, cd: Math.random(), target: null, recoil: 0, aim: b.rotation.y };
+      // estandartes azules colgando por fuera del muro (se caen con la brecha)
+      seg.deco = new THREE.Group(); scene.add(seg.deco); const bannerGrp = new THREE.Group();
+      for (const off2 of isGate ? [-3.2] : [-2.7, 2.7]) {
+        const bn = A.clone('kn/flag-banner-long'); bn.scale.setScalar(1.75);
+        bn.position.copy(center).addScaledVector(sd.n, 2.08).addScaledVector(sd.along, off2).setY(0.7);
+        bn.rotation.y = Math.atan2(-sd.n.z, sd.n.x); bannerGrp.add(bn);
+      }
+      mergeStatic(bannerGrp, seg.deco, true);
       seg.crew = center.clone().addScaledVector(sd.n, -1.3).addScaledVector(sd.along, 1.2).setY(isGate ? WALL_H + 0.4 : WALK_Y);
       castle.segments.push(seg);
     }
@@ -321,6 +350,9 @@ export function buildCastle(scene) {
   pt.traverse(o => { if (/top/i.test(o.name) && o.isMesh) o.visible = false; });
   const banner = A.clone('deco/flag_yellow'); banner.scale.setScalar(14); banner.position.set(-6.2 + 0.6, 2.49 * 6.6 * 0.585, -3 - 1.2); scene.add(banner);
   castle.princessSpot = new THREE.Vector3(-6.2 - 0.5 * 3.35, 2.49 * 6.6 * 0.585, -3 + 0.86 * 3.35);
+  // mercado y faroles en el patio
+  for (const [k, x, z, sc, ry] of [['kn/stall-green', 9.7, -2.5, 2.4, -Math.PI / 2], ['kn/cart', 9.9, 3.4, 2.4, 0.2], ['kn/lantern', 2.2, 10.6, 2, 0], ['kn/lantern', 7.8, 10.6, 2, 0]])
+    place(k, x, z, { s: sc, ry, scene, y: 0 });
   // utilería del patio
   const props = [['deco/well', 'castle/well', 4.5, -3.5, 7, 3], ['deco/tent', 'deco/tent', -7, 7, 6, 0.4], ['', 'deco/crate_A_big', 7.5, 7.5, 7, 0], ['', 'deco/crate_B_big', 8.4, 6.2, 7, 0.5], ['', 'deco/barrel', 6.5, 8.6, 7, 0],
     ['', 'deco/bucket_arrows', -2, 8.8, 9, 0], ['', 'deco/weaponrack', -9.5, 2, 8, Math.PI / 2], ['', 'res/Wood_Log_Stack', 9, -8, 1.6, 0.3], ['', 'res/Stone_Bricks_Stack_Small', 9.5, 1, 1.8, 0], ['', 'deco/wheelbarrow', 3, 9, 7, 2.5],
@@ -358,9 +390,11 @@ export function setSegmentLook(seg) {
       for (let i = 0; i < 3; i++) { const r = A.clone('castle/destroyed'); r.scale.setScalar(3.2); r.position.set((i - 1) * 3.3, 0, rnd(-0.5, 0.5)); r.rotation.y = rnd(0, 6); seg.rubble.add(r); }
       seg.grp.add(seg.rubble);
     }
-    seg.rubble.visible = true; seg.ballista.obj.visible = false;
+    seg.rubble.visible = true; seg.ballista.obj.visible = false; if (seg.deco) seg.deco.visible = false;
+    if (!seg.ballistaWreck) { const w = A.clone('kn/siege-ballista-demolished'); w.scale.setScalar(1.9); w.position.copy(seg.ballista.obj.position).setY(0.1); w.position.addScaledVector(seg.n, 1.4); w.rotation.y = Math.random() * 6; seg.grp.parent.add(w); seg.ballistaWreck = w; }
+    seg.ballistaWreck.visible = true;
   } else {
-    seg.wall.visible = true; if (seg.rubble) seg.rubble.visible = false; seg.ballista.obj.visible = true;
+    seg.wall.visible = true; if (seg.rubble) seg.rubble.visible = false; seg.ballista.obj.visible = true; if (seg.deco) seg.deco.visible = true; if (seg.ballistaWreck) seg.ballistaWreck.visible = false;
   }
   // grietas: piedras sueltas en la base
   if (st >= 1 && !seg.chunks) {

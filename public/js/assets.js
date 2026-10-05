@@ -15,6 +15,11 @@ export const MODELS = {
   res: ['Stone_Bricks_Stack_Small', 'Wood_Planks_Stack_Small', 'Gold_Bars_Stack_Small', 'Iron_Bars_Stack_Small', 'Stone_Chunks_Large', 'Wood_Log_Stack', 'Textiles_Stack_Small'],
   weapons: ['sword_A', 'sword_B', 'axe_A', 'axe_B', 'shield_A', 'shield_B', 'staff_A', 'staff_B', 'dagger_A', 'dagger_B', 'bow_A_withString', 'spear_A', 'hammer_A', 'halberd', 'arrow_A'],
   chars: ['Barbarian', 'Knight', 'Mage', 'Ranger', 'Rogue', 'Rogue_Hooded', 'Skeleton_Mage', 'Skeleton_Minion', 'Skeleton_Rogue', 'Skeleton_Warrior', 'peasant'],
+  // packs Kenney (castillo/asedio, pueblo, bosque): ver tools/build-kenney.mjs
+  kn: ['e-siege-catapult', 'e-siege-catapult-demolished', 'e-siege-trebuchet', 'e-siege-trebuchet-demolished', 'e-siege-ram', 'e-siege-ram-demolished', 'e-siege-tower', 'e-siege-tower-demolished', 'e-flag-wide', 'e-flag-pennant', 'e-flag-banner-short', 'e-tent', 'e-flag',
+    'siege-ballista', 'siege-ballista-demolished', 'flag-banner-long', 'flag-banner-short', 'flag-pennant', 'flag', 'metal-gate', 'rocks-large', 'rocks-small', 'tree-log', 'tree-trunk',
+    'cart', 'cart-high', 'lantern', 'stall', 'stall-green', 'stall-red', 'stall-bench', 'stall-stool', 'fountain-round-detail', 'hedge', 'hedge-large', 'hedge-curved', 'fence', 'fence-broken', 'fence-curved', 'fence-gate', 'watermill', 'wheel', 'planks', 'planks-half', 'poles', 'banner-red', 'banner-green', 'overhang', 'pillar-wood', 'rock-large', 'rock-wide', 'tree-high-round', 'tree-crooked', 'chimney',
+    'patch-dirt', 'patch-grass', 'plant', 'rocks-high', 'rocks-low', 'rocks-ramp', 'stones', 'target', 'tree', 'tree-high', 'building-platform', 'building-roof', 'building-structure', 'ladder', 'fence-rope'],
   enemies: ['zombie_a', 'zombie_b', 'goblin', 'imp', 'orc', 'ogre', 'mimic', 'dragon', 'monkey', 'batwing'],
 };
 const ANIM_FILES = ['General', 'MovementBasic', 'Simulation', 'Tools', 'CombatRanged', 'CombatMelee', 'Special'];
@@ -32,6 +37,14 @@ export async function loadAll(onProgress) {
   const queue = jobs.slice();
   await Promise.all(Array.from({ length: 6 }, async () => { while (queue.length) await run(queue.shift()); }));
   for (const a of ANIM_FILES) { const g = cache.get('anims/' + a); if (g) for (const c of g.animations) kayClips[c.name] = c; }
+  // Kenney: un solo material por textura (así se pueden unir en pocas mallas)
+  const shared = {};
+  for (const [k, g] of cache) if (k.startsWith('kn/')) g.scene.traverse(o => {
+    if (!o.isMesh) return;
+    const m = o.material; if (!m.name.startsWith('kn-')) return;
+    if (!shared[m.name]) { shared[m.name] = m; m.roughness = 0.95; m.metalness = 0; if (m.map) m.map.anisotropy = 4; }
+    o.material = shared[m.name];
+  });
   // las mallas de los modelos estáticos proyectan sombra
   for (const [k, g] of cache) g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = !k.startsWith('chars') && !k.startsWith('enemies'); } });
 }
